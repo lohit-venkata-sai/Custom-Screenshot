@@ -567,7 +567,8 @@ async function fullpageStitch(
   format: Format,
   rangeStart = 0,
   rangeEnd?: number,
-  targetWidth?: number
+  targetWidth?: number,
+  ys?: number[]
 ): Promise<{ dataUrl: string; width: number; height: number }> {
   const m = fullpageMetrics();
   const first = await loadImage(segments[0]);
@@ -585,14 +586,25 @@ async function fullpageStitch(
   if (!ctx) throw new Error("Canvas 2D unavailable");
   for (let i = 0; i < segments.length; i++) {
     const img = i === 0 ? first : await loadImage(segments[i]);
-    const absCss = rangeStart + i * m.viewportH;
-    const remainingCss = end - absCss;
-    if (remainingCss <= 0) break;
-    const shCss = Math.min(m.viewportH, remainingCss);
-    const shPx = Math.round(shCss * scale);
-    const dyPx = Math.round(i * m.viewportH * scale);
-    // source: top shPx of segment
-    ctx.drawImage(img, 0, 0, img.naturalWidth, shPx, 0, dyPx, img.naturalWidth, shPx);
+    // Actual content top for this shot (clamped scrolls repeat viewport —
+    // place by measured offset, never by blind index, to avoid duplication).
+    const shotTop = ys && ys[i] != null ? ys[i] : rangeStart + i * m.viewportH;
+    const visTop = Math.max(shotTop, rangeStart);
+    const visBottom = Math.min(shotTop + m.viewportH, end);
+    if (visBottom <= visTop) continue;
+    const srcY = Math.min(
+      img.naturalHeight - 1,
+      Math.max(0, Math.round((visTop - shotTop) * scale))
+    );
+    const srcH = Math.max(
+      1,
+      Math.min(
+        img.naturalHeight - srcY,
+        Math.round((visBottom - visTop) * scale)
+      )
+    );
+    const dyPx = Math.round((visTop - rangeStart) * scale);
+    ctx.drawImage(img, 0, srcY, img.naturalWidth, srcH, 0, dyPx, img.naturalWidth, srcH);
   }
   // Full pages keep full WIDTH (like GoFullPage): fit target width + 16K
   // height cap, never upscale. Height follows aspect — no squeezed strips.
@@ -711,7 +723,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           msg.format as Format,
           msg.rangeStart ?? 0,
           msg.rangeEnd,
-          msg.targetWidth
+          msg.targetWidth,
+          msg.ys
         );
         sendResponse(out);
         break;

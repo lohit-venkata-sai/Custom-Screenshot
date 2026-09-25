@@ -179,12 +179,18 @@ async function captureFullPageLoop(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
     await sendToTab(tabId, { type: "CS_FULLPAGE_PREP" });
     try {
       const segments: string[] = [];
+      const ys: number[] = [];
       let y = 0;
-      while (y < total) {
-        await sendToTab(tabId, { type: "CS_SCROLL_TO", y });
+      while (true) {
+        // Clamp the final scroll so the browser doesn't re-show the previous
+        // viewport (which would duplicate content at the seam).
+        const yy = Math.max(0, Math.min(y, total - viewportH));
+        await sendToTab(tabId, { type: "CS_SCROLL_TO", y: yy });
         await new Promise((r) => setTimeout(r, 600));
         // JPEG segments: far smaller messages; stitched + re-encoded after.
         segments.push(await captureVisibleRateLimited(tab.windowId, true));
+        ys.push(yy);
+        if (yy + viewportH >= total) break;
         y += viewportH;
         if (segments.length > 40) {
           throw new Error("Page is too long for full-page capture. Try Select Region instead.");
@@ -193,6 +199,7 @@ async function captureFullPageLoop(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
       const stitched = await sendToTab<{ dataUrl: string; width: number; height: number }>(tabId, {
         type: "CS_FULLPAGE_STITCH",
         segments,
+        ys,
         quality: cfg.quality,
         format: cfg.format,
         rangeStart: 0,
