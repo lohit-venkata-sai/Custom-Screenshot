@@ -1,0 +1,286 @@
+import { useCallback, useEffect, useState } from "react";
+import { Camera, Bookmark, Info } from "lucide-react";
+import { Toaster, toast } from "sonner";
+import { CaptureTab } from "./components/CaptureTab";
+import { PresetsTab, EditPresetDialog } from "./components/PresetsTab";
+import { Button } from "./components/ui";
+import { BrandIcon, FormatButton, QualityButton, ThemeIcon } from "./components/parts";
+import { applyTheme } from "../lib/theme";
+import {
+  deletePreset,
+  getStore,
+  savePreset,
+  saveSettings,
+  setActivePreset,
+  updatePreset,
+} from "../lib/storage";
+import { uid } from "../lib/utils";
+import type { CaptureType, Format, Preset, Quality } from "../types";
+import { QUALITY_DIMS } from "../types";
+import { cn } from "../lib/utils";
+
+const QUALITIES: Quality[] = ["1080p", "2K", "4K"];
+
+export default function App() {
+  const [tab, setTab] = useState<"capture" | "presets">("capture");
+  const [captureType, setCaptureType] = useState<CaptureType>("visible");
+  const [quality, setQuality] = useState<Quality>("1080p");
+  const [format, setFormat] = useState<Format>("png");
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [presets, setPresets] = useState<Preset[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [presetName, setPresetName] = useState("");
+  const [editing, setEditing] = useState<Preset | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    getStore().then((s) => {
+      setPresets(s.presets);
+      setActiveId(s.activePresetId);
+      setCaptureType(s.settings.captureType);
+      setQuality(s.settings.quality);
+      setFormat(s.settings.format);
+      setTheme(s.settings.theme);
+      applyTheme(s.settings.theme);
+    });
+  }, []);
+
+  const persistConfig = useCallback(
+    (c: CaptureType, q: Quality, f: Format) => {
+      saveSettings({ captureType: c, quality: q, format: f }).catch(() => undefined);
+    },
+    []
+  );
+
+  const toggleTheme = () => {
+    const next = theme === "light" ? "dark" : "light";
+    setTheme(next);
+    applyTheme(next);
+    saveSettings({ theme: next }).catch(() => undefined);
+  };
+
+  const handleSavePreset = async () => {
+    const name = presetName.trim();
+    if (!name || busy) return;
+    setBusy(true);
+    try {
+      const p: Preset = {
+        id: uid(),
+        name,
+        captureType,
+        quality,
+        format,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      const next = await savePreset(p);
+      setPresets(next);
+      // first preset auto-active handled in storage; refresh active id
+      const store = await getStore();
+      setActiveId(store.activePresetId);
+      setPresetName("");
+      toast.success(`Preset "${name}" saved`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save preset");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCapture = () => {
+    fireCapture({ captureType, quality, format });
+  };
+
+  const fireCapture = (config: { captureType: CaptureType; quality: Quality; format: Format }) => {
+    if (busy) return;
+    // Fire immediately (no waiting: interactive picks must start at once),
+    // then close the panel for a clean shot. Background reopens it when done
+    // (only this panel-initiated capture reopens — shortcut/pill captures don't).
+    chrome.runtime
+      .sendMessage({ type: "CS_CAPTURE", config, fromPanel: true })
+      .catch(() => undefined);
+    setTimeout(() => window.close(), 250);
+  };
+
+  const activePreset = presets.find((p) => p.id === activeId) ?? null;
+
+  return (
+    <div className="min-h-screen bg-background text-foreground">
+      <Toaster position="top-center" theme={theme} />
+      <header className="sticky top-0 z-10 border-b border-border bg-card/95 backdrop-blur">
+        <div className="flex items-center gap-2.5 px-4 py-3">
+          <BrandIcon />
+          <div className="flex-1 leading-tight">
+            <div className="font-extrabold text-[17px] tracking-tight">Custom Screenshot</div>
+            <div className="text-[12.5px] text-muted-foreground">Capture screenshots your way.</div>
+          </div>
+          <button
+            onClick={toggleTheme}
+            aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+            className="rounded-xl border border-border p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <ThemeIcon theme={theme} />
+          </button>
+        </div>
+        <nav className="flex px-4 gap-2 pb-0" aria-label="Sections">
+          {(["capture", "presets"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              aria-current={tab === t ? "page" : undefined}
+              className={cn(
+                "flex-1 rounded-t-xl px-3 py-2.5 text-[14px] font-semibold border-b-2 transition-colors",
+                tab === t
+                  ? "text-[#2563EB] dark:text-[#60A5FA] border-[#2563EB] dark:border-[#60A5FA] bg-[#EFF6FF]/60 dark:bg-[#172554]/60"
+                  : "text-muted-foreground border-transparent hover:text-foreground"
+              )}
+            >
+              {t === "capture" ? "Capture" : "Presets"}
+            </button>
+          ))}
+        </nav>
+      </header>
+
+      <main className="px-4 py-4 space-y-5 max-w-[480px] mx-auto">
+        {tab === "capture" ? (
+          <>
+            <CaptureTab
+              captureType={captureType}
+              onChange={(t) => {
+                setCaptureType(t);
+                // PDF exists only for full page.
+                const f = format === "pdf" && t !== "fullPage" ? "png" as Format : format;
+                if (f !== format) setFormat(f);
+                persistConfig(t, quality, f);
+              }}
+            />
+
+            <section>
+              <h2 className="text-[17px] font-bold mb-2 flex items-center gap-1.5">
+                Quality (Resolution)
+                <span className="relative inline-flex group">
+                  <button
+                    type="button"
+                    aria-label="About quality options"
+                    aria-describedby="quality-tip"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-border text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none"
+                  >
+                    <Info size={12} />
+                  </button>
+                  <span
+                    role="tooltip"
+                    id="quality-tip"
+                    className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-52 -translate-x-1/2 rounded-xl border border-border bg-card p-2.5 text-[12px] font-normal leading-snug text-muted-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                  >
+                    Visible shots match your screen. Full page saves at full width. Higher quality is sharper but larger.
+                  </span>
+                </span>
+              </h2>
+              <div className="grid grid-cols-4 gap-2">
+                {QUALITIES.map((q) => (
+                  <QualityButton
+                    key={q}
+                    active={quality === q}
+                    quality={q}
+                    sub={QUALITY_DIMS[q]}
+                    onClick={() => {
+                      setQuality(q);
+                      persistConfig(captureType, q, format);
+                    }}
+                  />
+                ))}
+              </div>
+            </section>
+
+            <section>
+              <h2 className="text-[17px] font-bold mb-2">Format</h2>
+              <div className="flex gap-2">
+                {(["png", "jpg", "webp"] as Format[]).map((f) => (
+                  <FormatButton key={f} active={format === f} format={f} onClick={() => { setFormat(f); persistConfig(captureType, quality, f); }} />
+                ))}
+                {captureType === "fullPage" && (
+                  <FormatButton active={format === "pdf"} format={"pdf" as Format} onClick={() => { setFormat("pdf"); persistConfig(captureType, quality, "pdf"); }} />
+                )}
+              </div>
+              {captureType === "fullPage" && (
+                <p className="mt-1.5 text-[12px] text-muted-foreground">PDF saves the full page as a document.</p>
+              )}
+            </section>
+
+            <section className="rounded-2xl border border-border bg-card p-3.5">
+              <div className="flex items-center gap-2 mb-1">
+                <Bookmark size={17} className="text-foreground" />
+                <h2 className="font-bold text-[15px]">Save as Preset</h2>
+              </div>
+              <p className="text-[13px] text-muted-foreground mb-2.5">Save the current configuration</p>
+              <div className="flex gap-2">
+                <input
+                  value={presetName}
+                  onChange={(e) => setPresetName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSavePreset();
+                  }}
+                  placeholder="Enter preset name…"
+                  aria-label="Preset name"
+                  className="flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground"
+                />
+                <Button onClick={handleSavePreset} disabled={!presetName.trim() || busy}>
+                  Save
+                </Button>
+              </div>
+              {activePreset && (
+                <p className="mt-2 text-[12.5px] text-muted-foreground">
+                  Active: <span className="font-semibold text-foreground">{activePreset.name}</span>
+                </p>
+              )}
+            </section>
+
+            <Button onClick={handleCapture} disabled={busy} className="w-full h-12 text-[15px] font-bold rounded-xl bg-gradient-to-r from-[#2563EB] to-[#3B82F6] dark:from-[#2563EB] dark:to-[#60A5FA] border border-white/20 shadow-lg">
+              <Camera size={19} /> Capture Screenshot
+              <kbd className="ml-2 rounded-md border border-white/30 px-2 py-0.5 text-[11px] font-medium" title="Remap to Ctrl + Alt + S in chrome://extensions/shortcuts">Alt + Shift + S</kbd>
+            </Button>
+          </>
+        ) : (
+          <>
+            <div>
+              <h2 className="text-[19px] font-extrabold">Presets</h2>
+              <p className="text-[13.5px] text-muted-foreground">Choose a preset to quickly capture with the same settings.</p>
+            </div>
+            <PresetsTab
+              presets={presets}
+              activeId={activeId}
+              onSetActive={async (id) => {
+                await setActivePreset(id);
+                setActiveId(id);
+                toast.success("Active preset updated");
+              }}
+              onDelete={async (id) => {
+                const res = await deletePreset(id);
+                setPresets(res.presets);
+                setActiveId(res.activePresetId);
+                toast.success("Preset deleted");
+              }}
+              onEdit={(p) => setEditing(p)}
+              onCapture={(p) =>
+                fireCapture({ captureType: p.captureType, quality: p.quality, format: p.format })
+              }
+            />
+          </>
+        )}
+      </main>
+
+      {editing && (
+        <EditPresetDialog
+          preset={editing}
+          onClose={() => setEditing(null)}
+          onSave={async (patch) => {
+            const next = await updatePreset(editing.id, patch);
+            setPresets(next);
+            setEditing(null);
+            toast.success("Preset updated");
+          }}
+        />
+      )}
+    </div>
+  );
+}
