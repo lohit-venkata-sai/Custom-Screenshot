@@ -106,7 +106,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <Toaster position="top-center" theme={theme} />
+      <Toaster position="top-center" theme={theme} closeButton toastOptions={{ duration: 3500 }} />
       <header className="sticky top-0 z-10 border-b border-border bg-card/95 backdrop-blur">
         <div className="flex items-center gap-2.5 px-4 py-3">
           <BrandIcon />
