@@ -175,16 +175,13 @@ async function copyToClipboard(dataUrl: string): Promise<"off" | "ok" | string> 
   }
 }
 
-/** Copies when enabled; returns toast suffix. Failures toast loudly. */
-async function copyReport(
-  tabId: number | null | undefined,
-  dataUrl: string,
-  format: string
-): Promise<string> {
+/** Copies when enabled; returns toast suffix. Merged into the success toast
+ * so status messages never stack on top of each other. */
+async function copyReport(dataUrl: string, format: string): Promise<string> {
   if (format === "pdf") return "";
   const r = await copyToClipboard(dataUrl);
   if (r === "ok") return " · copied";
-  if (r !== "off") await feedback(tabId, "Clipboard copy failed", r, true);
+  if (r !== "off") return ` · clipboard failed: ${r}`;
   return "";
 }
 
@@ -620,7 +617,7 @@ async function doCapture(cfg?: CaptureConfig) {
     if (!pro && (config.quality === "4K" || config.quality === "8K")) {
       await consumeTrial(config.quality, trialEmail);
     }
-    const clip = await copyReport(tab.id, res.dataUrl, config.format);
+    const clip = await copyReport(res.dataUrl, config.format);
     await feedback(tab.id, "Screenshot captured", `${res.width} × ${res.height} • ${config.format.toUpperCase()}${clip}`);
     return res;
   }
@@ -632,7 +629,7 @@ async function doCapture(cfg?: CaptureConfig) {
     const summary = (res.parts ?? 1) > 1
       ? `${res.parts} parts • ${config.format.toUpperCase()}`
       : `${res.width} × ${res.height} • ${config.format.toUpperCase()}`;
-    const clip = await copyReport(tab.id, res.dataUrl, config.format);
+    const clip = await copyReport(res.dataUrl, config.format);
     await sendToTab(tab.id, {
       type: "CS_TOAST",
       title: "Screenshot captured",
@@ -748,7 +745,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (sender.tab?.id != null) pendingTrial.delete(sender.tab.id);
       if (pending) await consumeTrial(pending.q, pending.email);
       await downloadDataUrl(msg.dataUrl, msg.format, "", sender.tab?.id);
-      const clip = await copyReport(sender.tab?.id, msg.dataUrl, msg.format);
+      const clip = await copyReport(msg.dataUrl, msg.format);
       if (sender.tab?.id != null) {
         await sendToTab(sender.tab.id, {
           type: "CS_TOAST",
