@@ -793,19 +793,22 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
               new ClipboardItem({ [blob.type || "image/png"]: blob }),
             ]);
           } catch (e) {
-            const url = URL.createObjectURL(blob);
+            const reader: string = await new Promise((resolve, reject) => {
+              const fr = new FileReader();
+              fr.onload = () => resolve(fr.result as string);
+              fr.onerror = () => reject(new Error("encode failed"));
+              fr.readAsDataURL(blob);
+            });
+            const wrap = document.createElement("div");
+            wrap.setAttribute("contenteditable", "true");
+            wrap.style.cssText = "position:fixed;top:0;left:0;";
+            const img = document.createElement("img");
+            img.src = reader;
+            wrap.appendChild(img);
+            document.documentElement.appendChild(wrap);
             try {
-              const img = document.createElement("img");
-              img.src = url;
-              img.style.cssText = "position:fixed;top:0;left:0;";
-              document.documentElement.appendChild(img);
-              try {
-                await img.decode();
-              } catch (_) {
-                /* proceed anyway */
-              }
               const range = document.createRange();
-              range.selectNode(img);
+              range.selectNode(wrap);
               const sel = window.getSelection();
               if (sel) {
                 sel.removeAllRanges();
@@ -813,10 +816,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
               }
               const ok = document.execCommand("copy");
               if (sel) sel.removeAllRanges();
-              img.remove();
               if (!ok) throw new Error("execCommand copy returned false: " + (e as Error).message);
             } finally {
-              URL.revokeObjectURL(url);
+              wrap.remove();
             }
           }
           sendResponse({ ok: true });
