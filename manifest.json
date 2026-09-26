@@ -18,7 +18,11 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": ["storage", "downloads", "activeTab", "scripting", "sidePanel", "notifications", "debugger"],
+  "permissions": ["storage", "downloads", "activeTab", "scripting", "sidePanel", "notifications", "debugger", "identity"],
+  "oauth2": {
+    "client_id": "YOUR-GOOGLE-CLIENT-ID.apps.googleusercontent.com",
+    "scopes": ["openid", "email", "profile"]
+  },
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "src/background/index.ts",

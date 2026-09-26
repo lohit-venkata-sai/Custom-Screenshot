@@ -9,6 +9,7 @@ import {
   openLoginPage,
   openPaymentPage,
   refreshProCache,
+  signInWithGoogle,
 } from "../../lib/pro";
 
 type Status = "checking" | "unpaid" | "paid";
@@ -57,12 +58,18 @@ export function ProModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const signIn = () => {
+  const signIn = async () => {
     try {
-      openLoginPage();
-      toast.message("Check your email for the sign-in link, then hit Refresh below");
-    } catch {
-      toast.error("Could not open sign-in");
+      const email = await signInWithGoogle();
+      onSignedIn(email);
+      toast.success(`Signed in as ${email} — trial active`);
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      if (/NO_EMAIL|no token|canceled|denied|OAuth/i.test(m)) {
+        toast.message("Sign-in was cancelled or isn't configured yet");
+      } else {
+        toast.error("Google sign-in failed — check your connection");
+      }
     }
   };
 
@@ -176,7 +183,20 @@ export function ProModal({
               onClick={refreshIdentity}
               className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] text-muted-foreground hover:text-foreground"
             >
-              <RefreshCw size={13} /> I've signed in — refresh
+              <RefreshCw size={13} /> Already signed in elsewhere — refresh
+            </button>
+            <button
+              onClick={() => {
+                try {
+                  openLoginPage();
+                  toast.message("Check your email for the sign-in link, then hit Refresh below");
+                } catch {
+                  toast.error("Could not open email sign-in");
+                }
+              }}
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg px-2 py-1 text-[12px] text-muted-foreground hover:text-foreground"
+            >
+              Prefer email link instead
             </button>
           </>
         ) : (

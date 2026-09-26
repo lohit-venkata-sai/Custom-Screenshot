@@ -85,11 +85,50 @@ export async function clearLocalPro(): Promise<void> {
   }
 }
 
+// ---------- Google sign-in (chrome.identity, for trial binding) ----------
+// Free, no backend. Owner setup (once, ~10 min):
+// 1. https://console.cloud.google.com → new project → OAuth consent screen
+//    (External, add openid/email/profile scopes).
+// 2. Credentials → Create → OAuth client ID → Application type "Chrome",
+//    paste THIS extension's ID from chrome://extensions.
+// 3. Paste the client ID below AND into manifest.json's oauth2.client_id.
+// 4. At Web Store publish the extension ID changes → repeat step 2 for it.
+
+export const GOOGLE_CLIENT_ID = "YOUR-GOOGLE-CLIENT-ID.apps.googleusercontent.com";
+
+async function googleEmail(interactive: boolean): Promise<string | null> {
+  if (GOOGLE_CLIENT_ID.startsWith("YOUR-")) return null;
+  const token: string = await new Promise((resolve, reject) => {
+    chrome.identity.getAuthToken({ interactive }, (t) => {
+      if (chrome.runtime.lastError || !t) reject(new Error(chrome.runtime.lastError?.message ?? "no token"));
+      else resolve(t as string);
+    });
+  });
+  const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("userinfo failed");
+  const info = (await res.json()) as { email?: string };
+  return info.email ?? null;
+}
+
+/** Interactive Google sign-in (account picker). Throws when unconfigured/cancelled. */
+export async function signInWithGoogle(): Promise<string> {
+  const email = await googleEmail(true);
+  if (!email) throw new Error("NO_EMAIL");
+  try {
+    await chrome.storage.local.set({ trialEmail: email });
+  } catch {
+    /* noop */
+  }
+  return email;
+}
+
 /**
- * Trial identity: the logged-in ExtensionPay email, cached locally.
- * Trials bind to this — clearing browser data alone no longer resets them,
- * because the same email re-resolves to the same person on next login.
- * Returns null when never logged in (network failures included).
+ * Trial identity: Google account first (silent if already granted), then the
+ * cached address, then ExtensionPay login. Trials bind to this — clearing
+ * browser data alone no longer resets them.
+ * Returns null when never signed in (network failures included).
  */
 export async function getTrialIdentity(): Promise<string | null> {
   try {
@@ -99,6 +138,19 @@ export async function getTrialIdentity(): Promise<string | null> {
     }
   } catch {
     /* noop */
+  }
+  try {
+    const email = await googleEmail(false);
+    if (email) {
+      try {
+        await chrome.storage.local.set({ trialEmail: email });
+      } catch {
+        /* noop */
+      }
+      return email;
+    }
+  } catch {
+    /* not granted / offline */
   }
   try {
     const user = await fetchProUser();
