@@ -783,6 +783,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         setBusy(!!msg.on);
         sendResponse({ ok: true });
         break;
+      case "CS_CLIPBOARD_WRITE_PAGE": {
+        // Last-resort copy for browsers without the offscreen API.
+        // Needs a focused tab; failures are reported, never silent.
+        try {
+          const blob = await (await fetch(msg.dataUrl as string)).blob();
+          await navigator.clipboard.write([
+            new ClipboardItem({ [blob.type || "image/png"]: blob }),
+          ]);
+          sendResponse({ ok: true });
+        } catch (e) {
+          sendResponse({ ok: false, error: e instanceof Error ? e.message : String(e) });
+        }
+        break;
+      }
       case "CS_PROCESS_VISIBLE": {
         hideUI();
         await new Promise((r) => setTimeout(r, 50));

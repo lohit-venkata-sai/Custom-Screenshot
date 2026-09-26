@@ -137,7 +137,7 @@ async function downloadDataUrl(
 
 async function ensureClipboardDoc(): Promise<string | null> {
   if (typeof chrome.offscreen === "undefined") {
-    return "offscreen API missing";
+    return "API_MISSING";
   }
   try {
     const has = await (chrome.offscreen as unknown as { hasDocument?: () => Promise<boolean> }).hasDocument?.();
@@ -160,7 +160,7 @@ async function ensureClipboardDoc(): Promise<string | null> {
   }
 }
 
-async function copyToClipboard(dataUrl: string): Promise<"off" | "ok" | string> {
+async function copyToClipboard(dataUrl: string, tabId?: number | null): Promise<"off" | "ok" | string> {
   let on = false;
   try {
     const s = await getSettings();
@@ -170,13 +170,27 @@ async function copyToClipboard(dataUrl: string): Promise<"off" | "ok" | string> 
   }
   if (!on) return "off";
   const docErr = await ensureClipboardDoc();
-  if (docErr) return `offscreen: ${docErr}`;
+  if (!docErr) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "CS_CLIPBOARD_WRITE", dataUrl });
+      if (res?.ok) return "ok";
+      return res?.error ?? "copy rejected";
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
+  }
+  // No offscreen API (old browser): last resort is a page-context write,
+  // which needs the tab focused and may still fail — reported honestly.
+  if (docErr !== "API_MISSING" || tabId == null) return `offscreen: ${docErr}`;
   try {
-    const res = await chrome.runtime.sendMessage({ type: "CS_CLIPBOARD_WRITE", dataUrl });
+    const res = await sendToTab<{ ok?: boolean; error?: string }>(tabId, {
+      type: "CS_CLIPBOARD_WRITE_PAGE",
+      dataUrl,
+    });
     if (res?.ok) return "ok";
-    return res?.error ?? "copy rejected";
+    return `page write failed (${res?.error ?? "unknown"}) — update browser for reliable copy`;
   } catch (e) {
-    return e instanceof Error ? e.message : String(e);
+    return `page write failed (${e instanceof Error ? e.message : String(e)}) — update browser for reliable copy`;
   }
 }
 
@@ -188,7 +202,7 @@ async function copyReport(
   format: string
 ): Promise<string> {
   if (format === "pdf") return "";
-  const r = await copyToClipboard(dataUrl);
+  const r = await copyToClipboard(dataUrl, tabId);
   if (r === "ok") return " · copied";
   if (r !== "off") await feedback(tabId, "Clipboard copy failed", r, true);
   return "";
