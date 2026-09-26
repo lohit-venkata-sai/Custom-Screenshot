@@ -232,8 +232,10 @@ async function copyReport(
     return on ? " · clipboard skipped for PDF" : "";
   }
   const r = await copyToClipboard(dataUrl, tabId);
-  if (r === "ok") return " · copied";
-  if (r === "ok-html") return " · copied (paste into chat/docs as image)";
+  const approxKb = Math.max(1, Math.round(((dataUrl.length * 3) / 4 / 1024) * 10) / 10);
+  const size = approxKb >= 1024 ? `${(approxKb / 1024).toFixed(1)}MB` : `${approxKb}KB`;
+  if (r === "ok") return ` · copied (${size})`;
+  if (r === "ok-html") return ` · copied as image (${size}) — paste into chat/docs`;
   if (r !== "off") await feedback(tabId, "Clipboard copy failed", r, true);
   return "";
 }
