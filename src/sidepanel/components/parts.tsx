@@ -27,8 +27,8 @@ export function ThemeIcon({ theme }: { theme: "light" | "dark" }) {
   return theme === "light" ? <Moon size={18} /> : <Sun size={18} />;
 }
 
-/** Discord invite — TODO(owner): paste the invite URL. */
-export const DISCORD_URL = "#";
+/** Discord invite. */
+export const DISCORD_URL = "https://discord.gg/M4kAbUJbS";
 
 export function DiscordIcon({ size = 18 }: { size?: number }) {
   return (
