@@ -829,7 +829,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const blob = await c.convertToBlob({ type: "image/png" });
       const dataUrl = await blobToDataUrl(blob);
       const r = await copyToClipboard(dataUrl, tab?.id ?? null);
-      sendResponse({ ok: r === "ok", detail: r });
+      const good = r === "ok" || r === "ok-html";
+      sendResponse({ ok: good, detail: good ? (r === "ok-html" ? "ok (HTML flavor)" : r) : r });
     }
   })()
     .catch((e) => {
