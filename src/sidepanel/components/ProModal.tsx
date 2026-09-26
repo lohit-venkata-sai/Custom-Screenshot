@@ -15,11 +15,13 @@ type Status = "checking" | "unpaid" | "paid";
 
 /** Pro upsell: unlimited 4K + 8K via ExtensionPay (Google login + Stripe). */
 export function ProModal({
-  trialLeft,
+  trialLeft4k,
+  trialLeft8k,
   onClose,
   onUnlocked,
 }: {
-  trialLeft: number;
+  trialLeft4k: number;
+  trialLeft8k: number;
   onClose: () => void;
   onUnlocked: () => void;
 }) {
@@ -117,9 +119,7 @@ export function ProModal({
         ) : (
           <>
             <p className="mt-1.5 text-[13.5px] text-muted-foreground">
-              {trialLeft > 0
-                ? `${trialLeft} of ${TRIAL_DAILY_4K} free 4K shots left today.`
-                : `You've used today's ${TRIAL_DAILY_4K} free 4K shots.`}
+              Trial today: 4K {trialLeft4k}/{TRIAL_DAILY_4K} · 8K {trialLeft8k}/{TRIAL_DAILY_4K} free left.
             </p>
             <ul className="mt-3 space-y-1.5 text-[13.5px]">
               <li>✓ Unlimited 4K captures</li>

@@ -13,7 +13,7 @@ import {
   savePreset,
   saveSettings,
   setActivePreset,
-  trialRemaining4k,
+  trialRemaining,
   TRIAL_DAILY_4K,
   updatePreset,
 } from "../lib/storage";
@@ -38,6 +38,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [proOpen, setProOpen] = useState(false);
   const [trialLeft, setTrialLeft] = useState<number>(2);
+  const [trialLeft8k, setTrialLeft8k] = useState<number>(2);
   const [pro, setPro] = useState(false);
 
   useEffect(() => {
@@ -50,7 +51,8 @@ export default function App() {
       setTheme(s.settings.theme);
       applyTheme(s.settings.theme);
     });
-    trialRemaining4k().then(setTrialLeft).catch(() => undefined);
+    trialRemaining("4K").then(setTrialLeft).catch(() => undefined);
+    trialRemaining("8K").then(setTrialLeft8k).catch(() => undefined);
     isPro().then(setPro).catch(() => undefined);
     // Reopened after an exhausted 4K trial: go straight to the upsell.
     chrome.storage.session
@@ -112,7 +114,7 @@ export default function App() {
 
   const fireCapture = async (config: { captureType: CaptureType; quality: Quality; format: Format }) => {
     if (busy) return;
-    if (!pro && config.quality === "4K" && (await trialRemaining4k().catch(() => 1)) <= 0) {
+    if (!pro && (config.quality === "4K" || config.quality === "8K") && (await trialRemaining(config.quality).catch(() => 1)) <= 0) {
       setProOpen(true);
       return;
     }
@@ -130,7 +132,13 @@ export default function App() {
   };
 
   const activePreset = presets.find((p) => p.id === activeId) ?? null;
-  const lockedQualities: Quality[] = pro ? [] : ["8K"];
+  // Trial qualities lock with a gold badge once today's free shots run out.
+  const lockedQualities: Quality[] = pro
+    ? []
+    : [
+        ...(trialLeft <= 0 ? ["4K" as Quality] : []),
+        ...(trialLeft8k <= 0 ? ["8K" as Quality] : []),
+      ];
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -205,9 +213,10 @@ export default function App() {
                         setProOpen(true);
                         return;
                       }
-                      if (!pro && q === "4K") {
-                        trialRemaining4k().then((left) => {
-                          setTrialLeft(left);
+                      if (!pro && (q === "4K" || q === "8K")) {
+                        trialRemaining(q).then((left) => {
+                          if (q === "4K") setTrialLeft(left);
+                          else setTrialLeft8k(left);
                           if (left <= 0) {
                             setProOpen(true);
                             return;
@@ -223,9 +232,9 @@ export default function App() {
                   />
                 ))}
               </div>
-              {!pro && trialLeft < TRIAL_DAILY_4K && (
+              {!pro && (trialLeft < TRIAL_DAILY_4K || trialLeft8k < TRIAL_DAILY_4K) && (
                 <p className="mt-1.5 text-[12px] text-muted-foreground">
-                  4K trial: {trialLeft} of {TRIAL_DAILY_4K} free left today.
+                  Trial today: 4K {trialLeft}/{TRIAL_DAILY_4K} · 8K {trialLeft8k}/{TRIAL_DAILY_4K} free left.
                 </p>
               )}
               {pro && (
@@ -309,7 +318,6 @@ export default function App() {
               onCapture={(p) =>
                 fireCapture({ captureType: p.captureType, quality: p.quality, format: p.format })
               }
-              pro={pro}
             />
           </>
         )}
@@ -318,7 +326,6 @@ export default function App() {
       {editing && (
         <EditPresetDialog
           preset={editing}
-          pro={pro}
           onClose={() => setEditing(null)}
           onSave={async (patch) => {
             const next = await updatePreset(editing.id, patch);
@@ -331,14 +338,17 @@ export default function App() {
 
       {proOpen && (
         <ProModal
-          trialLeft={trialLeft}
+          trialLeft4k={trialLeft}
+          trialLeft8k={trialLeft8k}
           onClose={() => {
             setProOpen(false);
-            trialRemaining4k().then(setTrialLeft).catch(() => undefined);
+            trialRemaining("4K").then(setTrialLeft).catch(() => undefined);
+            trialRemaining("8K").then(setTrialLeft8k).catch(() => undefined);
           }}
           onUnlocked={() => {
             setPro(true);
-            trialRemaining4k().then(setTrialLeft).catch(() => undefined);
+            trialRemaining("4K").then(setTrialLeft).catch(() => undefined);
+            trialRemaining("8K").then(setTrialLeft8k).catch(() => undefined);
           }}
         />
       )}

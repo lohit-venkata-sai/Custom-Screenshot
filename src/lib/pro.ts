@@ -15,6 +15,9 @@ import ExtPay from "./extpay/ExtPay.module.js";
 // TODO(owner): paste your ExtensionPay extension ID here.
 export const EXTPAY_EXTENSION_ID: string = "custom-screenshot";
 export const EXTPAY_CONFIGURED = EXTPAY_EXTENSION_ID !== "REPLACE-WITH-EXTENSIONPAY-ID";
+// Flip to true once plans are live and tested. Until then the paywall shows
+// "coming soon" instead of opening checkout.
+export const PAYMENTS_LIVE = false;
 
 export interface ProUser {
   paid: boolean;
@@ -83,12 +86,12 @@ export async function clearLocalPro(): Promise<void> {
 }
 
 export function openPaymentPage(): void {
-  if (!EXTPAY_CONFIGURED) throw new Error("NOT_CONFIGURED");
+  if (!EXTPAY_CONFIGURED || !PAYMENTS_LIVE) throw new Error("NOT_LIVE");
   client().openPaymentPage();
 }
 
 export function openLoginPage(): void {
-  if (!EXTPAY_CONFIGURED) throw new Error("NOT_CONFIGURED");
+  if (!EXTPAY_CONFIGURED || !PAYMENTS_LIVE) throw new Error("NOT_LIVE");
   client().openLoginPage();
 }
 

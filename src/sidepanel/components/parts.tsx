@@ -86,7 +86,7 @@ export function QualityButton({
       )}
     >
       {locked && (
-        <Lock size={11} className="absolute top-1.5 right-1.5 text-muted-foreground" aria-hidden />
+        <Lock size={11} className="absolute top-1.5 right-1.5 text-[#D4AF37]" aria-hidden />
       )}
       <div className="text-sm font-semibold">{quality}</div>
       <div className={cn("text-xs", active ? "text-white/80" : "text-muted-foreground")}>{sub}</div>

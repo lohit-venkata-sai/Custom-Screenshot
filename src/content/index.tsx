@@ -104,12 +104,11 @@ async function onFocusCapture() {
       config: { captureType: cfg.captureType, quality: cfg.quality, format: cfg.format },
     });
     if (!res?.ok) {
-      const err =
-        res?.error === "TRIAL_EXHAUSTED"
-          ? "Daily 4K trial used up (2/day) — open Custom Screenshot to go Pro"
-          : res?.error === "PRO_REQUIRED"
-            ? "8K is a Pro feature — open Custom Screenshot to upgrade"
-            : (res?.error ?? "Unknown error");
+      const rawErr = res?.error ?? "Unknown error";
+      const trialQ = rawErr.startsWith("TRIAL_EXHAUSTED") ? rawErr.split(":")[1] || "4K" : null;
+      const err = trialQ
+        ? `Daily ${trialQ} trial used up (2/day) — open Custom Screenshot to go Pro`
+        : rawErr;
       toast("Capture failed", err, true);
     }
     // ok + result null => interactive pick started; pick overlay takes over.
@@ -137,16 +136,16 @@ function showUI() {
   setFocusSuppressed(false);
 }
 
-// Browser focus rings (e.g. a focused button/link) are page pixels, so they
-// would be captured. Adjusted purely through CSS: a temporary stylesheet
-// kills outlines while a capture runs, removed afterwards.
+// Browser focus rings (e.g. a focused button/link) and scrollbars are page
+// pixels, so they would be captured. Adjusted purely through CSS: a temporary
+// stylesheet neutralizes them while a capture runs, removed afterwards.
 function setFocusSuppressed(on: boolean) {
   const id = "cs-focus-killer";
   if (on) {
     if (!document.getElementById(id)) {
       const st = document.createElement("style");
       st.id = id;
-      st.textContent = `*:focus{outline:none !important;box-shadow:none !important;}*:focus-visible{outline:none !important;box-shadow:none !important;}`;
+      st.textContent = `*:focus{outline:none !important;box-shadow:none !important;}*:focus-visible{outline:none !important;box-shadow:none !important;}html::-webkit-scrollbar,body::-webkit-scrollbar{width:0 !important;height:0 !important;display:none !important;}html,body{scrollbar-width:none !important;-ms-overflow-style:none !important;}`;
       document.head.appendChild(st);
     }
   } else {

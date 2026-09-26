@@ -11,7 +11,6 @@ export function PresetsTab({
   onDelete,
   onEdit,
   onCapture,
-  pro,
 }: {
   presets: Preset[];
   activeId: string | null;
@@ -19,7 +18,6 @@ export function PresetsTab({
   onDelete: (id: string) => void;
   onEdit: (p: Preset) => void;
   onCapture: (p: Preset) => void;
-  pro: boolean;
 }) {
   const [menu, setMenu] = useState<string | null>(null);
 
@@ -127,12 +125,10 @@ export function PresetsTab({
 
 export function EditPresetDialog({
   preset,
-  pro,
   onClose,
   onSave,
 }: {
   preset: Preset;
-  pro: boolean;
   onClose: () => void;
   onSave: (patch: { name: string; captureType: CaptureType; quality: Quality; format: Format }) => void;
 }) {
@@ -175,25 +171,20 @@ export function EditPresetDialog({
           <div>
             <label className="text-[13px] font-medium">Quality</label>
             <div className="mt-1 flex gap-1">
-              {(["720p", "1080p", "2K", "4K", "8K"] as Quality[]).map((q) => {
-                const locked = q === "8K" && !pro;
-                return (
-                  <button
-                    key={q}
-                    onClick={() => !locked && setQuality(q)}
-                    aria-disabled={locked}
-                    title={locked ? "8K is a Pro feature" : q}
-                    className={
-                      quality === q
-                        ? "flex-1 rounded-lg bg-[#2563EB] py-1.5 text-[12px] font-semibold text-white"
-                        : "flex-1 rounded-lg border border-border py-1.5 text-[12px] hover:bg-muted disabled:opacity-60"
-                    }
-                    disabled={locked && quality !== "8K"}
-                  >
-                    {locked ? "8K 🔒" : q}
-                  </button>
-                );
-              })}
+              {(["720p", "1080p", "2K", "4K", "8K"] as Quality[]).map((q) => (
+                <button
+                  key={q}
+                  onClick={() => setQuality(q)}
+                  title={q}
+                  className={
+                    quality === q
+                      ? "flex-1 rounded-lg bg-[#2563EB] py-1.5 text-[12px] font-semibold text-white"
+                      : "flex-1 rounded-lg border border-border py-1.5 text-[12px] hover:bg-muted"
+                  }
+                >
+                  {q}
+                </button>
+              ))}
             </div>
           </div>
           <div>
