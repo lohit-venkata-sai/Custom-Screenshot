@@ -89,6 +89,7 @@ export function QualityButton({
   locked?: boolean;
   onClick: () => void;
 }) {
+  const isPremium = quality === "4K" || quality === "8K";
   return (
     <button
       onClick={onClick}
@@ -97,9 +98,10 @@ export function QualityButton({
       className={cn(
         "relative flex-1 rounded-xl border px-2 py-2.5 text-center transition-colors",
         active
-          ? "bg-[#2563EB] border-[#2563EB] text-white dark:bg-[#3B82F6] dark:border-[#3B82F6]"
+          ? "bg-[#2563EB] text-white dark:bg-[#3B82F6]"
           : "bg-card border-border text-foreground hover:bg-muted",
-        locked && !active && "opacity-60"
+        locked && !active && "opacity-60",
+        isPremium && "border-[#D4AF37] shadow-[0_0_0_1px_#D4AF37]"
       )}
     >
       {locked && (
