@@ -139,24 +139,22 @@ async function ensureClipboardDoc(): Promise<string | null> {
   if (typeof chrome.offscreen === "undefined") {
     return "API_MISSING";
   }
+  const reason = (chrome.offscreen.Reason?.CLIPBOARD ?? "CLIPBOARD") as never;
+  // Close-then-create: avoids stale-document races entirely.
   try {
-    const has = await (chrome.offscreen as unknown as { hasDocument?: () => Promise<boolean> }).hasDocument?.();
-    if (has) return null;
+    await chrome.offscreen.closeDocument();
   } catch {
-    /* fall through: try creating */
+    /* none open — proceed to create */
   }
   try {
     await chrome.offscreen.createDocument({
       url: "offscreen/clipboard.html",
-      reasons: ["CLIPBOARD" as never],
+      reasons: [reason],
       justification: "Copy screenshots to clipboard when enabled in settings",
     });
     return null;
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    // "Only a single offscreen document may be created" simply means it exists.
-    if (/single|exist|duplicate/i.test(m)) return null;
-    return m;
+    return e instanceof Error ? e.message : String(e);
   }
 }
 

@@ -18,7 +18,7 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": ["storage", "downloads", "activeTab", "scripting", "sidePanel", "notifications", "debugger", "identity"],
+  "permissions": ["storage", "downloads", "activeTab", "scripting", "sidePanel", "notifications", "debugger", "identity", "offscreen"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "src/background/index.ts",
