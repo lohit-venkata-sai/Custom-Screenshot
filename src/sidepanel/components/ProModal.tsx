@@ -186,19 +186,6 @@ export function ProModal({
             >
               <RefreshCw size={13} /> Already signed in elsewhere — refresh
             </button>
-            <button
-              onClick={() => {
-                try {
-                  openLoginPage();
-                  toast.message("Check your email for the sign-in link, then hit Refresh below");
-                } catch {
-                  toast.error("Could not open email sign-in");
-                }
-              }}
-              className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg px-2 py-1 text-[12px] text-muted-foreground hover:text-foreground"
-            >
-              Prefer email link instead
-            </button>
           </>
         ) : (
           <>
