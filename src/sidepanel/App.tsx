@@ -55,7 +55,11 @@ export default function App() {
       setFormat(s.settings.format);
       setTheme(s.settings.theme);
       applyTheme(s.settings.theme);
-      setClipboard(!!s.settings.clipboard);
+      // Clipboard is parked for rework: force off (stale enabled flags).
+      setClipboard(false);
+      if (s.settings.clipboard) {
+        saveSettings({ clipboard: false }).catch(() => undefined);
+      }
     });
     const loadTrials = (email: string | null) => {
       const em = email ?? "";

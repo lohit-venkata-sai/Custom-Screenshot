@@ -86,48 +86,22 @@ export function ProfileDialog({
         )}
 
         <h4 className="mt-4 text-[13px] font-bold uppercase tracking-wide text-muted-foreground">Settings</h4>
-        <label className="mt-2 flex cursor-pointer items-center justify-between rounded-xl border border-border p-3">
+        <label className="mt-2 flex cursor-pointer items-center justify-between rounded-xl border border-border p-3 opacity-70">
           <span className="text-[13.5px]">
             Copy to clipboard
-            <span className="block text-[12px] text-muted-foreground">Also copy each shot (PNG/JPG/WebP) to clipboard</span>
+            <span className="block text-[12px] text-muted-foreground">Coming soon — under rework</span>
           </span>
           <button
             role="switch"
-            aria-checked={clipboard}
-            aria-label="Copy screenshots to clipboard"
-            onClick={(e) => {
-              e.preventDefault();
-              onClipboardChange(!clipboard);
-            }}
-            className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
-              clipboard ? "bg-[#2563EB]" : "bg-muted"
-            }`}
+            aria-checked={false}
+            aria-disabled={true}
+            aria-label="Copy screenshots to clipboard (coming soon)"
+            disabled
+            className="relative h-6 w-11 shrink-0 cursor-not-allowed rounded-full transition-colors bg-muted"
           >
-            <span
-              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
-                clipboard ? "left-[22px]" : "left-0.5"
-              }`}
-            />
+            <span className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all left-0.5" />
           </button>
         </label>
-        {clipboard && (
-          <button
-            onClick={() => {
-              chrome.runtime
-                .sendMessage({ type: "CS_CLIPBOARD_TEST" })
-                .then((res: { ok?: boolean; detail?: string } | undefined) => {
-                  if (res?.ok) toast.success("Clipboard test passed — try pasting now");
-                  else toast.error(`Clipboard test failed: ${res?.detail ?? "no response"}`);
-                })
-                .catch((e: unknown) =>
-                  toast.error(`Clipboard test failed: ${e instanceof Error ? e.message : String(e)}`)
-                );
-            }}
-            className="mt-2 w-full rounded-lg border border-border py-2 text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            Test clipboard copy
-          </button>
-        )}
 
         <a
           href={DISCORD_URL}
