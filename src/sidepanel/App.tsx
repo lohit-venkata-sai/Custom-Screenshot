@@ -17,13 +17,13 @@ import {
   TRIAL_DAILY_4K,
   updatePreset,
 } from "../lib/storage";
+import { isPro } from "../lib/pro";
 import { uid } from "../lib/utils";
 import type { CaptureType, Format, Preset, Quality } from "../types";
 import { QUALITY_DIMS } from "../types";
 import { cn } from "../lib/utils";
 
 const QUALITIES: Quality[] = ["720p", "1080p", "2K", "4K", "8K"];
-const LOCKED_QUALITIES: Quality[] = ["8K"];
 
 export default function App() {
   const [tab, setTab] = useState<"capture" | "presets">("capture");
@@ -38,6 +38,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [proOpen, setProOpen] = useState(false);
   const [trialLeft, setTrialLeft] = useState<number>(2);
+  const [pro, setPro] = useState(false);
 
   useEffect(() => {
     getStore().then((s) => {
@@ -50,6 +51,7 @@ export default function App() {
       applyTheme(s.settings.theme);
     });
     trialRemaining4k().then(setTrialLeft).catch(() => undefined);
+    isPro().then(setPro).catch(() => undefined);
     // Reopened after an exhausted 4K trial: go straight to the upsell.
     chrome.storage.session
       ?.get("proModal")
@@ -110,7 +112,11 @@ export default function App() {
 
   const fireCapture = async (config: { captureType: CaptureType; quality: Quality; format: Format }) => {
     if (busy) return;
-    if (config.quality === "4K" && (await trialRemaining4k().catch(() => 1)) <= 0) {
+    if (!pro && config.quality === "4K" && (await trialRemaining4k().catch(() => 1)) <= 0) {
+      setProOpen(true);
+      return;
+    }
+    if (!pro && config.quality === "8K") {
       setProOpen(true);
       return;
     }
@@ -124,6 +130,7 @@ export default function App() {
   };
 
   const activePreset = presets.find((p) => p.id === activeId) ?? null;
+  const lockedQualities: Quality[] = pro ? [] : ["8K"];
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -192,13 +199,13 @@ export default function App() {
                     active={quality === q}
                     quality={q}
                     sub={QUALITY_DIMS[q]}
-                    locked={LOCKED_QUALITIES.includes(q)}
+                    locked={lockedQualities.includes(q)}
                     onClick={() => {
-                      if (LOCKED_QUALITIES.includes(q)) {
+                      if (lockedQualities.includes(q)) {
                         setProOpen(true);
                         return;
                       }
-                      if (q === "4K") {
+                      if (!pro && q === "4K") {
                         trialRemaining4k().then((left) => {
                           setTrialLeft(left);
                           if (left <= 0) {
@@ -216,9 +223,14 @@ export default function App() {
                   />
                 ))}
               </div>
-              {trialLeft < TRIAL_DAILY_4K && (
+              {!pro && trialLeft < TRIAL_DAILY_4K && (
                 <p className="mt-1.5 text-[12px] text-muted-foreground">
                   4K trial: {trialLeft} of {TRIAL_DAILY_4K} free left today.
+                </p>
+              )}
+              {pro && (
+                <p className="mt-1.5 text-[12px] text-muted-foreground">
+                  ✓ Pro active — unlimited 4K and 8K.
                 </p>
               )}
             </section>
@@ -297,6 +309,7 @@ export default function App() {
               onCapture={(p) =>
                 fireCapture({ captureType: p.captureType, quality: p.quality, format: p.format })
               }
+              pro={pro}
             />
           </>
         )}
@@ -305,6 +318,7 @@ export default function App() {
       {editing && (
         <EditPresetDialog
           preset={editing}
+          pro={pro}
           onClose={() => setEditing(null)}
           onSave={async (patch) => {
             const next = await updatePreset(editing.id, patch);
@@ -320,6 +334,10 @@ export default function App() {
           trialLeft={trialLeft}
           onClose={() => {
             setProOpen(false);
+            trialRemaining4k().then(setTrialLeft).catch(() => undefined);
+          }}
+          onUnlocked={() => {
+            setPro(true);
             trialRemaining4k().then(setTrialLeft).catch(() => undefined);
           }}
         />

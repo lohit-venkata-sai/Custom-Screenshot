@@ -2,6 +2,9 @@ import type { CaptureConfig } from "../types";
 import { QUALITY_HEIGHT, QUALITY_WIDTH } from "../types";
 import { getActivePreset, getSettings } from "../lib/storage";
 import { consumeTrial4k, trialRemaining4k } from "../lib/storage";
+import { isPro, startProBackground } from "../lib/pro";
+
+startProBackground();
 import { formatTimestamp, sanitizeFilename } from "../lib/utils";
 import { extFor } from "../lib/capture";
 import { jpegPagesToPdfDataUrl, type PdfPageImage } from "../lib/pdf";
@@ -533,8 +536,12 @@ async function doCapture(cfg?: CaptureConfig) {
   const config = cfg ?? (await resolveConfig());
   // PDF is a full-page-only format.
   if (config.format === "pdf" && config.captureType !== "fullPage") config.format = "png";
-  // 4K trial gate: 2 free shots/day (PRO: skip when licensed).
-  if (config.quality === "4K" && (await trialRemaining4k()) <= 0) {
+  // 4K trial gate (PRO bypasses): 2 free shots/day. 8K is Pro-only.
+  const pro = await isPro();
+  if (config.quality === "8K" && !pro) {
+    throw new Error("PRO_REQUIRED");
+  }
+  if (config.quality === "4K" && !pro && (await trialRemaining4k()) <= 0) {
     throw new Error("TRIAL_EXHAUSTED");
   }
   if (config.captureType === "visible") {
@@ -547,13 +554,13 @@ async function doCapture(cfg?: CaptureConfig) {
       // restricted page: capture + resize fully in the service worker
       res = await captureVisibleSW(tab, config);
     }
-    if (config.quality === "4K") await consumeTrial4k();
+    if (!pro && config.quality === "4K") await consumeTrial4k();
     await feedback(tab.id, "Screenshot captured", `${res.width} × ${res.height} • ${config.format.toUpperCase()}`);
     return res;
   }
   if (config.captureType === "fullPage") {
     const res = await captureFullPageLoop(tab, config);
-    if (config.quality === "4K") await consumeTrial4k();
+    if (!pro && config.quality === "4K") await consumeTrial4k();
     const summary = (res.parts ?? 1) > 1
       ? `${res.parts} parts • ${config.format.toUpperCase()}`
       : `${res.width} × ${res.height} • ${config.format.toUpperCase()}`;
@@ -566,7 +573,7 @@ async function doCapture(cfg?: CaptureConfig) {
   }
   // region / element need user interaction
   await ensureContent(tab.id, tab.url ?? "");
-  if (config.quality === "4K" && tab.id != null) pendingTrial.add(tab.id);
+  if (!pro && config.quality === "4K" && tab.id != null) pendingTrial.add(tab.id);
   await sendToTab(tab.id, { type: "CS_START_PICK", mode: config.captureType });
   // open nothing; content script will message back with rect/element then we capture
   return null;
@@ -605,8 +612,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const message =
           rawMessage === "TRIAL_EXHAUSTED"
             ? "Daily 4K trial used up (2/day) — open Custom Screenshot to go Pro"
-            : rawMessage;
-        if (rawMessage === "TRIAL_EXHAUSTED") {
+            : rawMessage === "PRO_REQUIRED"
+              ? "8K is a Pro feature — open Custom Screenshot to upgrade"
+              : rawMessage;
+        if (rawMessage === "TRIAL_EXHAUSTED" || rawMessage === "PRO_REQUIRED") {
           pendingTrial.delete(tab!.id!);
           // Ask the reopened panel to show the Pro upsell.
           try {
@@ -710,7 +719,9 @@ chrome.commands.onCommand.addListener(async (command) => {
       const message =
         rawMessage === "TRIAL_EXHAUSTED"
           ? "Daily 4K trial used up (2/day) — open Custom Screenshot to go Pro"
-          : rawMessage;
+          : rawMessage === "PRO_REQUIRED"
+            ? "8K is a Pro feature — open Custom Screenshot to upgrade"
+            : rawMessage;
       await feedback(tab?.id, "Capture failed", message, true);
     } finally {
       if (tab?.id != null) {

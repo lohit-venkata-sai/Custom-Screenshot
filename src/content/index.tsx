@@ -107,7 +107,9 @@ async function onFocusCapture() {
       const err =
         res?.error === "TRIAL_EXHAUSTED"
           ? "Daily 4K trial used up (2/day) — open Custom Screenshot to go Pro"
-          : (res?.error ?? "Unknown error");
+          : res?.error === "PRO_REQUIRED"
+            ? "8K is a Pro feature — open Custom Screenshot to upgrade"
+            : (res?.error ?? "Unknown error");
       toast("Capture failed", err, true);
     }
     // ok + result null => interactive pick started; pick overlay takes over.
