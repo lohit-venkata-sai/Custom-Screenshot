@@ -184,6 +184,20 @@ async function copyToClipboard(dataUrl: string, tabId?: number | null): Promise<
         await new Promise((r) => setTimeout(r, 350));
       }
     }
+    // Offscreen failed: fall back to a page-context write (clipboardWrite
+    // permission), which succeeds when the tab is focused.
+    if (tabId != null) {
+      try {
+        const res = await sendToTab<{ ok?: boolean; error?: string }>(tabId, {
+          type: "CS_CLIPBOARD_WRITE_PAGE",
+          dataUrl,
+        });
+        if (res?.ok) return "ok";
+        return `page write failed (${res?.error ?? "unknown"}) [offscreen: ${lastErr}]`;
+      } catch {
+        /* report combined failure below */
+      }
+    }
     return lastErr;
   }
   // No offscreen API (old browser): last resort is a page-context write,
