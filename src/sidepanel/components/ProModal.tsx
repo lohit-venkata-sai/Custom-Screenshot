@@ -39,15 +39,6 @@ export function ProModal({
 }) {
   const [status, setStatus] = useState<Status>("checking");
   const [email, setEmail] = useState<string | null>(null);
-  const [isBrave, setIsBrave] = useState(false);
-
-  useEffect(() => {
-    const nav = navigator as Navigator & { brave?: { isBrave?: () => Promise<boolean> } };
-    nav.brave
-      ?.isBrave?.()
-      .then(setIsBrave)
-      .catch(() => undefined);
-  }, []);
 
   const check = async () => {
     setStatus("checking");
@@ -182,11 +173,6 @@ export function ProModal({
               4K and 8K trials need an account — 2 free shots of each, every day.
               Signing in ties the trial to you.
             </p>
-            {isBrave && (
-              <p className="mt-2 rounded-xl border border-border bg-muted/50 px-3 py-2 text-[12.5px] text-muted-foreground">
-                Brave doesn't support Google sign-in for extensions — use the email link below instead.
-              </p>
-            )}
             <Button
               className="mt-4 w-full h-11 font-bold"
               onClick={signIn}

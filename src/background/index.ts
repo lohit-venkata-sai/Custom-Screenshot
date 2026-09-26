@@ -128,6 +128,45 @@ async function downloadDataUrl(dataUrl: string, format: string, suffix = ""): Pr
   const filename = sanitizeFilename(`Screenshot_${formatTimestamp()}${suffix}.${ext}`);
   // chrome.downloads.download with data URL works for reasonable sizes; use it directly
   await chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
+  // Opt-in clipboard copy runs here so EVERY flow (visible, full page, picks,
+  // restricted-page fallback) is covered from one place.
+  if (format !== "pdf") {
+    copyToClipboard(dataUrl).catch(() => undefined);
+  }
+}
+
+async function ensureClipboardDoc(): Promise<boolean> {
+  try {
+    const has = await (chrome.offscreen as unknown as { hasDocument?: () => Promise<boolean> }).hasDocument?.();
+    if (has) return true;
+  } catch {
+    /* fall through: try creating */
+  }
+  try {
+    await chrome.offscreen.createDocument({
+      url: "offscreen/clipboard.html",
+      reasons: ["CLIPBOARD" as never],
+      justification: "Copy screenshots to clipboard when enabled in settings",
+    });
+  } catch (e) {
+    // "Only a single offscreen document may be created" simply means it exists.
+    const m = e instanceof Error ? e.message : String(e);
+    if (!/single|exist|duplicate/i.test(m)) return false;
+  }
+  return true;
+}
+
+async function copyToClipboard(dataUrl: string): Promise<void> {
+  let on = false;
+  try {
+    const s = await getSettings();
+    on = s.clipboard === true;
+  } catch {
+    return;
+  }
+  if (!on) return;
+  if (!(await ensureClipboardDoc())) return;
+  await chrome.runtime.sendMessage({ type: "CS_CLIPBOARD_WRITE", dataUrl });
 }
 
 async function withOverlayHidden<T>(tabId: number, fn: () => Promise<T>): Promise<T> {
