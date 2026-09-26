@@ -222,7 +222,7 @@ async function toast(title: string, body: string, error = false) {
   el.setAttribute("role", error ? "alert" : "status");
   const bg = error ? "#DC2626" : theme === "dark" ? "#1E293B" : "#0F172A";
   const border = error ? "#991B1B" : theme === "dark" ? "#334155" : "#1E293B";
-  el.style.cssText = `position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:2147483647;pointer-events:none;font-family:Inter,ui-sans-serif,system-ui,sans-serif;background:${bg};color:#fff;border:1px solid ${border};border-radius:12px;padding:10px 16px;font-size:13px;font-weight:500;box-shadow:0 12px 32px rgba(0,0,0,.35);display:flex;gap:8px;align-items:center;max-width:min(480px,90vw);`;
+  el.style.cssText = `position:fixed;top:14px;right:14px;z-index:2147483647;pointer-events:none;font-family:Inter,ui-sans-serif,system-ui,sans-serif;background:${bg};color:#fff;border:1px solid ${border};border-radius:12px;padding:10px 16px;font-size:13px;font-weight:500;box-shadow:0 12px 32px rgba(0,0,0,.35);display:flex;gap:8px;align-items:center;max-width:min(420px,90vw);`;
   el.textContent = `${error ? "✕" : "✓"} ${title}${body ? " — " + body : ""}`;
   root.appendChild(el);
   setTimeout(() => el.remove(), error ? 5000 : 3200);
