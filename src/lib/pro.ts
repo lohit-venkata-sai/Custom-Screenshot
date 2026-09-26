@@ -98,7 +98,7 @@ export async function clearLocalPro(): Promise<void> {
 // 3. Paste the Web client ID below.
 
 export const GOOGLE_CLIENT_ID = "578950807331-nadm1i72mdqupt88mntt9apket8n2q2n.apps.googleusercontent.com";
-export const GOOGLE_WEB_CLIENT_ID = "YOUR-WEB-CLIENT-ID.apps.googleusercontent.com";
+export const GOOGLE_WEB_CLIENT_ID = "578950807331-4cbqd6kcg5bttgcoe8s2302i14j2tnrk.apps.googleusercontent.com";
 
 /** Interactive Google sign-in via auth popup. Throws when unconfigured/cancelled. */
 export async function signInWithGoogle(): Promise<string> {
