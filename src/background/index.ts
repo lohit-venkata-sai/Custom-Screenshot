@@ -123,15 +123,24 @@ async function sendToTab<T>(tabId: number, msg: unknown): Promise<T> {
   return (await chrome.tabs.sendMessage(tabId, msg)) as T;
 }
 
-async function downloadDataUrl(dataUrl: string, format: string, suffix = ""): Promise<void> {
+async function downloadDataUrl(
+  dataUrl: string,
+  format: string,
+  suffix = "",
+  tabId?: number
+): Promise<void> {
   const ext = extFor(format as never);
   const filename = sanitizeFilename(`Screenshot_${formatTimestamp()}${suffix}.${ext}`);
   // chrome.downloads.download with data URL works for reasonable sizes; use it directly
   await chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
   // Opt-in clipboard copy runs here so EVERY flow (visible, full page, picks,
-  // restricted-page fallback) is covered from one place.
+  // restricted-page fallback) is covered from one place. Failures toast —
+  // silent clipboard bugs are worse than noisy ones.
   if (format !== "pdf") {
-    copyToClipboard(dataUrl).catch(() => undefined);
+    const clipErr = await copyToClipboard(dataUrl);
+    if (clipErr) {
+      await feedback(tabId, "Clipboard copy failed", clipErr, true);
+    }
   }
 }
 
@@ -156,17 +165,23 @@ async function ensureClipboardDoc(): Promise<boolean> {
   return true;
 }
 
-async function copyToClipboard(dataUrl: string): Promise<void> {
+async function copyToClipboard(dataUrl: string): Promise<string | null> {
   let on = false;
   try {
     const s = await getSettings();
     on = s.clipboard === true;
   } catch {
-    return;
+    return "settings unreadable";
   }
-  if (!on) return;
-  if (!(await ensureClipboardDoc())) return;
-  await chrome.runtime.sendMessage({ type: "CS_CLIPBOARD_WRITE", dataUrl });
+  if (!on) return null;
+  if (!(await ensureClipboardDoc())) return "offscreen document unavailable";
+  try {
+    const res = await chrome.runtime.sendMessage({ type: "CS_CLIPBOARD_WRITE", dataUrl });
+    if (res?.ok) return null;
+    return res?.error ?? "copy rejected";
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
 }
 
 async function withOverlayHidden<T>(tabId: number, fn: () => Promise<T>): Promise<T> {
@@ -203,7 +218,7 @@ async function captureVisiblePreset(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
           bmp.close();
         }
       });
-      await downloadDataUrl(res.dataUrl, cfg.format);
+      await downloadDataUrl(res.dataUrl, cfg.format, "", tab.id);
       return res;
     } catch {
       /* fall through to classic path */
@@ -218,7 +233,7 @@ async function captureVisiblePreset(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
       format: cfg.format,
     });
   });
-  await downloadDataUrl(res.dataUrl, cfg.format);
+  await downloadDataUrl(res.dataUrl, cfg.format, "", tab.id);
   return res;
 }
 
@@ -266,7 +281,7 @@ async function captureFullPageEmu(
     const bmp = await createImageBitmap(u8ToBlob(shot.bytes, shot.mime));
     try {
       const final = await finalizeBitmapSW(bmp, cfg, "width");
-      await downloadDataUrl(final.dataUrl, cfg.format);
+      await downloadDataUrl(final.dataUrl, cfg.format, "", tabId);
       return { ...final, parts: 1 };
     } finally {
       bmp.close();
@@ -354,7 +369,7 @@ async function captureFullPageScroll(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
         rangeEnd: total,
         targetWidth: QUALITY_WIDTH[cfg.quality],
       });
-      await downloadDataUrl(stitched.dataUrl, cfg.format);
+      await downloadDataUrl(stitched.dataUrl, cfg.format, "", tabId);
       return { ...stitched, parts: 1 };
     } finally {
       if (zoomUsed !== 1) {
@@ -404,7 +419,7 @@ async function captureVisibleSW(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
   const bmp = await createImageBitmap(await (await fetch(raw)).blob());
   try {
     const final = await finalizeBitmapSW(bmp, cfg);
-    await downloadDataUrl(final.dataUrl, cfg.format);
+    await downloadDataUrl(final.dataUrl, cfg.format, "", tab.id);
     return final;
   } finally {
     bmp.close();
@@ -719,14 +734,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       });
       sendResponse({ ok: true, raw: res });
     } else if (msg.type === "CS_DOWNLOAD") {
-      await downloadDataUrl(msg.dataUrl, msg.format);
+      await downloadDataUrl(msg.dataUrl, msg.format, "", sender.tab?.id);
       sendResponse({ ok: true });
     } else if (msg.type === "CS_FINISH_PICK") {
       // content script selected rect/element screenshot already processed; just download + toast
       const pending = sender.tab?.id != null ? pendingTrial.get(sender.tab.id) : undefined;
       if (sender.tab?.id != null) pendingTrial.delete(sender.tab.id);
       if (pending) await consumeTrial(pending.q, pending.email);
-      await downloadDataUrl(msg.dataUrl, msg.format);
+      await downloadDataUrl(msg.dataUrl, msg.format, "", sender.tab?.id);
       if (sender.tab?.id != null) {
         await sendToTab(sender.tab.id, {
           type: "CS_TOAST",
