@@ -135,10 +135,13 @@ async function downloadDataUrl(
   await chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
 }
 
-async function ensureClipboardDoc(): Promise<boolean> {
+async function ensureClipboardDoc(): Promise<string | null> {
+  if (typeof chrome.offscreen === "undefined") {
+    return "offscreen API missing";
+  }
   try {
     const has = await (chrome.offscreen as unknown as { hasDocument?: () => Promise<boolean> }).hasDocument?.();
-    if (has) return true;
+    if (has) return null;
   } catch {
     /* fall through: try creating */
   }
@@ -148,12 +151,13 @@ async function ensureClipboardDoc(): Promise<boolean> {
       reasons: ["CLIPBOARD" as never],
       justification: "Copy screenshots to clipboard when enabled in settings",
     });
+    return null;
   } catch (e) {
-    // "Only a single offscreen document may be created" simply means it exists.
     const m = e instanceof Error ? e.message : String(e);
-    if (!/single|exist|duplicate/i.test(m)) return false;
+    // "Only a single offscreen document may be created" simply means it exists.
+    if (/single|exist|duplicate/i.test(m)) return null;
+    return m;
   }
-  return true;
 }
 
 async function copyToClipboard(dataUrl: string): Promise<"off" | "ok" | string> {
@@ -165,7 +169,8 @@ async function copyToClipboard(dataUrl: string): Promise<"off" | "ok" | string> 
     return "settings unreadable";
   }
   if (!on) return "off";
-  if (!(await ensureClipboardDoc())) return "offscreen document unavailable";
+  const docErr = await ensureClipboardDoc();
+  if (docErr) return `offscreen: ${docErr}`;
   try {
     const res = await chrome.runtime.sendMessage({ type: "CS_CLIPBOARD_WRITE", dataUrl });
     if (res?.ok) return "ok";
@@ -175,13 +180,17 @@ async function copyToClipboard(dataUrl: string): Promise<"off" | "ok" | string> 
   }
 }
 
-/** Copies when enabled; returns toast suffix. Merged into the success toast
- * so status messages never stack on top of each other. */
-async function copyReport(dataUrl: string, format: string): Promise<string> {
+/** Copies when enabled. Success appends "· copied" to the success toast;
+ * failures get their OWN toast (stacked below, never overlapping). */
+async function copyReport(
+  tabId: number | null | undefined,
+  dataUrl: string,
+  format: string
+): Promise<string> {
   if (format === "pdf") return "";
   const r = await copyToClipboard(dataUrl);
   if (r === "ok") return " · copied";
-  if (r !== "off") return ` · clipboard failed: ${r}`;
+  if (r !== "off") await feedback(tabId, "Clipboard copy failed", r, true);
   return "";
 }
 
@@ -617,7 +626,7 @@ async function doCapture(cfg?: CaptureConfig) {
     if (!pro && (config.quality === "4K" || config.quality === "8K")) {
       await consumeTrial(config.quality, trialEmail);
     }
-    const clip = await copyReport(res.dataUrl, config.format);
+    const clip = await copyReport(tab.id, res.dataUrl, config.format);
     await feedback(tab.id, "Screenshot captured", `${res.width} × ${res.height} • ${config.format.toUpperCase()}${clip}`);
     return res;
   }
@@ -629,7 +638,7 @@ async function doCapture(cfg?: CaptureConfig) {
     const summary = (res.parts ?? 1) > 1
       ? `${res.parts} parts • ${config.format.toUpperCase()}`
       : `${res.width} × ${res.height} • ${config.format.toUpperCase()}`;
-    const clip = await copyReport(res.dataUrl, config.format);
+    const clip = await copyReport(tab.id, res.dataUrl, config.format);
     await sendToTab(tab.id, {
       type: "CS_TOAST",
       title: "Screenshot captured",
@@ -745,7 +754,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (sender.tab?.id != null) pendingTrial.delete(sender.tab.id);
       if (pending) await consumeTrial(pending.q, pending.email);
       await downloadDataUrl(msg.dataUrl, msg.format, "", sender.tab?.id);
-      const clip = await copyReport(msg.dataUrl, msg.format);
+      const clip = await copyReport(sender.tab?.id, msg.dataUrl, msg.format);
       if (sender.tab?.id != null) {
         await sendToTab(sender.tab.id, {
           type: "CS_TOAST",
