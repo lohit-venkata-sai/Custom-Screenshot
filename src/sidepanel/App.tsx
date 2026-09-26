@@ -3,7 +3,7 @@ import { Camera, Bookmark } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { CaptureTab } from "./components/CaptureTab";
 import { PresetsTab, EditPresetDialog } from "./components/PresetsTab";
-import { ProModal } from "./components/ProModal";
+import { ProModal, type ProModalMode } from "./components/ProModal";
 import { Button } from "./components/ui";
 import { BrandIcon, FormatButton, QualityButton, ThemeIcon, InfoTip } from "./components/parts";
 import { applyTheme } from "../lib/theme";
@@ -17,7 +17,7 @@ import {
   TRIAL_DAILY_4K,
   updatePreset,
 } from "../lib/storage";
-import { isPro } from "../lib/pro";
+import { isPro, fetchProUser } from "../lib/pro";
 import { uid } from "../lib/utils";
 import type { CaptureType, Format, Preset, Quality } from "../types";
 import { QUALITY_DIMS } from "../types";
@@ -36,10 +36,11 @@ export default function App() {
   const [presetName, setPresetName] = useState("");
   const [editing, setEditing] = useState<Preset | null>(null);
   const [busy, setBusy] = useState(false);
-  const [proOpen, setProOpen] = useState(false);
+  const [proOpen, setProOpen] = useState<ProModalMode | null>(null);
   const [trialLeft, setTrialLeft] = useState<number>(2);
   const [trialLeft8k, setTrialLeft8k] = useState<number>(2);
   const [pro, setPro] = useState(false);
+  const [identity, setIdentity] = useState<string | null>(null);
 
   useEffect(() => {
     getStore().then((s) => {
@@ -51,16 +52,27 @@ export default function App() {
       setTheme(s.settings.theme);
       applyTheme(s.settings.theme);
     });
-    trialRemaining("4K").then(setTrialLeft).catch(() => undefined);
-    trialRemaining("8K").then(setTrialLeft8k).catch(() => undefined);
+    const loadTrials = (email: string | null) => {
+      const em = email ?? "";
+      trialRemaining("4K", em).then(setTrialLeft).catch(() => undefined);
+      trialRemaining("8K", em).then(setTrialLeft8k).catch(() => undefined);
+    };
+    loadTrials(null);
     isPro().then(setPro).catch(() => undefined);
-    // Reopened after an exhausted 4K trial: go straight to the upsell.
+    fetchProUser()
+      .then((u) => {
+        setIdentity(u.email);
+        if (u.paid) setPro(true);
+        if (u.email) loadTrials(u.email);
+      })
+      .catch(() => undefined);
+    // Reopened after a gated 4K/8K attempt: go straight to sign-in or upsell.
     chrome.storage.session
       ?.get("proModal")
       .then((r) => {
-        if (r.proModal) {
+        if (r.proModal === "login" || r.proModal === "upsell") {
           chrome.storage.session.remove("proModal").catch(() => undefined);
-          setProOpen(true);
+          setProOpen(r.proModal);
         }
       })
       .catch(() => undefined);
@@ -114,13 +126,15 @@ export default function App() {
 
   const fireCapture = async (config: { captureType: CaptureType; quality: Quality; format: Format }) => {
     if (busy) return;
-    if (!pro && (config.quality === "4K" || config.quality === "8K") && (await trialRemaining(config.quality).catch(() => 1)) <= 0) {
-      setProOpen(true);
-      return;
-    }
-    if (!pro && config.quality === "8K") {
-      setProOpen(true);
-      return;
+    if (!pro && (config.quality === "4K" || config.quality === "8K")) {
+      if (!identity) {
+        setProOpen("login");
+        return;
+      }
+      if ((await trialRemaining(config.quality, identity).catch(() => 1)) <= 0) {
+        setProOpen("upsell");
+        return;
+      }
     }
     // Fire immediately (no waiting: interactive picks must start at once),
     // then close the panel for a clean shot. Background reopens it when done
@@ -210,15 +224,19 @@ export default function App() {
                     locked={lockedQualities.includes(q)}
                     onClick={() => {
                       if (lockedQualities.includes(q)) {
-                        setProOpen(true);
+                        setProOpen(identity ? "upsell" : "login");
                         return;
                       }
                       if (!pro && (q === "4K" || q === "8K")) {
-                        trialRemaining(q).then((left) => {
+                        if (!identity) {
+                          setProOpen("login");
+                          return;
+                        }
+                        trialRemaining(q, identity).then((left) => {
                           if (q === "4K") setTrialLeft(left);
                           else setTrialLeft8k(left);
                           if (left <= 0) {
-                            setProOpen(true);
+                            setProOpen("upsell");
                             return;
                           }
                           setQuality(q);
@@ -337,17 +355,25 @@ export default function App() {
 
       {proOpen && (
         <ProModal
+          mode={proOpen}
           trialLeft4k={trialLeft}
           trialLeft8k={trialLeft8k}
           onClose={() => {
-            setProOpen(false);
-            trialRemaining("4K").then(setTrialLeft).catch(() => undefined);
-            trialRemaining("8K").then(setTrialLeft8k).catch(() => undefined);
+            setProOpen(null);
+            const em = identity ?? "";
+            trialRemaining("4K", em).then(setTrialLeft).catch(() => undefined);
+            trialRemaining("8K", em).then(setTrialLeft8k).catch(() => undefined);
           }}
           onUnlocked={() => {
             setPro(true);
-            trialRemaining("4K").then(setTrialLeft).catch(() => undefined);
-            trialRemaining("8K").then(setTrialLeft8k).catch(() => undefined);
+            const em = identity ?? "";
+            trialRemaining("4K", em).then(setTrialLeft).catch(() => undefined);
+            trialRemaining("8K", em).then(setTrialLeft8k).catch(() => undefined);
+          }}
+          onSignedIn={(email) => {
+            setIdentity(email);
+            trialRemaining("4K", email).then(setTrialLeft).catch(() => undefined);
+            trialRemaining("8K", email).then(setTrialLeft8k).catch(() => undefined);
           }}
         />
       )}
