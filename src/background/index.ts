@@ -175,7 +175,7 @@ async function copyToClipboard(dataUrl: string, tabId?: number | null): Promise<
     for (let i = 0; i < 8; i++) {
       try {
         const res = await chrome.runtime.sendMessage({ type: "CS_CLIPBOARD_WRITE", dataUrl });
-        if (res?.ok) return "ok";
+        if (res?.ok) return res?.flavor === "html" ? "ok-html" : "ok";
         lastErr = res?.error ?? "copy rejected";
         break;
       } catch (e) {
@@ -204,11 +204,11 @@ async function copyToClipboard(dataUrl: string, tabId?: number | null): Promise<
   // which needs the tab focused and may still fail — reported honestly.
   if (docErr !== "API_MISSING" || tabId == null) return `offscreen: ${docErr}`;
   try {
-    const res = await sendToTab<{ ok?: boolean; error?: string }>(tabId, {
+    const res = await sendToTab<{ ok?: boolean; flavor?: string; error?: string }>(tabId, {
       type: "CS_CLIPBOARD_WRITE_PAGE",
       dataUrl,
     });
-    if (res?.ok) return "ok";
+    if (res?.ok) return res?.flavor === "html" ? "ok-html" : "ok";
     return `page write failed (${res?.error ?? "unknown"}) — update browser for reliable copy`;
   } catch (e) {
     return `page write failed (${e instanceof Error ? e.message : String(e)}) — update browser for reliable copy`;
@@ -233,6 +233,7 @@ async function copyReport(
   }
   const r = await copyToClipboard(dataUrl, tabId);
   if (r === "ok") return " · copied";
+  if (r === "ok-html") return " · copied (paste into chat/docs as image)";
   if (r !== "off") await feedback(tabId, "Clipboard copy failed", r, true);
   return "";
 }

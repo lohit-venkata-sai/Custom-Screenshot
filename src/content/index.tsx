@@ -788,11 +788,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         // Tries clipboard.write, then the focus-free img+execCommand trick.
         try {
           const blob = await (await fetch(msg.dataUrl as string)).blob();
+          let flavor = "bitmap";
           try {
             await navigator.clipboard.write([
               new ClipboardItem({ [blob.type || "image/png"]: blob }),
             ]);
           } catch (e) {
+            flavor = "html";
             const reader: string = await new Promise((resolve, reject) => {
               const fr = new FileReader();
               fr.onload = () => resolve(fr.result as string);
@@ -821,7 +823,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
               wrap.remove();
             }
           }
-          sendResponse({ ok: true });
+          sendResponse({ ok: true, flavor });
         } catch (e) {
           sendResponse({ ok: false, error: e instanceof Error ? e.message : String(e) });
         }

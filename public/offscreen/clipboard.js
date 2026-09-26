@@ -7,7 +7,7 @@ async function blobToClipboard(blob) {
     await navigator.clipboard.write([
       new ClipboardItem({ [blob.type || "image/png"]: blob }),
     ]);
-    return;
+    return "bitmap";
   } catch (e) {
     // clipboard.write needs a focused document (offscreen never has one).
     // Fallback: select an <img> with an EMBEDDED data URL and execCommand
@@ -36,6 +36,7 @@ async function blobToClipboard(blob) {
       const ok = document.execCommand("copy");
       if (sel) sel.removeAllRanges();
       if (!ok) throw new Error("execCommand copy returned false: " + (e && e.message));
+      return "html";
     } finally {
       wrap.remove();
     }
@@ -46,9 +47,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || msg.type !== "CS_CLIPBOARD_WRITE") return false;
   (async () => {
     const blob = await (await fetch(msg.dataUrl)).blob();
-    await blobToClipboard(blob);
+    const flavor = await blobToClipboard(blob);
+    return flavor;
   })().then(
-    () => sendResponse({ ok: true }),
+    (flavor) => sendResponse({ ok: true, flavor }),
     (e) => sendResponse({ ok: false, error: String((e && e.message) || e) })
   );
   return true;
