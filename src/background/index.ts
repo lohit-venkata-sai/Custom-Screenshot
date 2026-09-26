@@ -133,15 +133,6 @@ async function downloadDataUrl(
   const filename = sanitizeFilename(`Screenshot_${formatTimestamp()}${suffix}.${ext}`);
   // chrome.downloads.download with data URL works for reasonable sizes; use it directly
   await chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
-  // Opt-in clipboard copy runs here so EVERY flow (visible, full page, picks,
-  // restricted-page fallback) is covered from one place. Failures toast —
-  // silent clipboard bugs are worse than noisy ones.
-  if (format !== "pdf") {
-    const clipErr = await copyToClipboard(dataUrl);
-    if (clipErr) {
-      await feedback(tabId, "Clipboard copy failed", clipErr, true);
-    }
-  }
 }
 
 async function ensureClipboardDoc(): Promise<boolean> {
@@ -165,7 +156,7 @@ async function ensureClipboardDoc(): Promise<boolean> {
   return true;
 }
 
-async function copyToClipboard(dataUrl: string): Promise<string | null> {
+async function copyToClipboard(dataUrl: string): Promise<"off" | "ok" | string> {
   let on = false;
   try {
     const s = await getSettings();
@@ -173,15 +164,28 @@ async function copyToClipboard(dataUrl: string): Promise<string | null> {
   } catch {
     return "settings unreadable";
   }
-  if (!on) return null;
+  if (!on) return "off";
   if (!(await ensureClipboardDoc())) return "offscreen document unavailable";
   try {
     const res = await chrome.runtime.sendMessage({ type: "CS_CLIPBOARD_WRITE", dataUrl });
-    if (res?.ok) return null;
+    if (res?.ok) return "ok";
     return res?.error ?? "copy rejected";
   } catch (e) {
     return e instanceof Error ? e.message : String(e);
   }
+}
+
+/** Copies when enabled; returns toast suffix. Failures toast loudly. */
+async function copyReport(
+  tabId: number | null | undefined,
+  dataUrl: string,
+  format: string
+): Promise<string> {
+  if (format === "pdf") return "";
+  const r = await copyToClipboard(dataUrl);
+  if (r === "ok") return " · copied";
+  if (r !== "off") await feedback(tabId, "Clipboard copy failed", r, true);
+  return "";
 }
 
 async function withOverlayHidden<T>(tabId: number, fn: () => Promise<T>): Promise<T> {
@@ -616,7 +620,8 @@ async function doCapture(cfg?: CaptureConfig) {
     if (!pro && (config.quality === "4K" || config.quality === "8K")) {
       await consumeTrial(config.quality, trialEmail);
     }
-    await feedback(tab.id, "Screenshot captured", `${res.width} × ${res.height} • ${config.format.toUpperCase()}`);
+    const clip = await copyReport(tab.id, res.dataUrl, config.format);
+    await feedback(tab.id, "Screenshot captured", `${res.width} × ${res.height} • ${config.format.toUpperCase()}${clip}`);
     return res;
   }
   if (config.captureType === "fullPage") {
@@ -627,10 +632,11 @@ async function doCapture(cfg?: CaptureConfig) {
     const summary = (res.parts ?? 1) > 1
       ? `${res.parts} parts • ${config.format.toUpperCase()}`
       : `${res.width} × ${res.height} • ${config.format.toUpperCase()}`;
+    const clip = await copyReport(tab.id, res.dataUrl, config.format);
     await sendToTab(tab.id, {
       type: "CS_TOAST",
       title: "Screenshot captured",
-      body: summary,
+      body: summary + clip,
     }).catch(() => undefined);
     return res;
   }
@@ -742,11 +748,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (sender.tab?.id != null) pendingTrial.delete(sender.tab.id);
       if (pending) await consumeTrial(pending.q, pending.email);
       await downloadDataUrl(msg.dataUrl, msg.format, "", sender.tab?.id);
+      const clip = await copyReport(sender.tab?.id, msg.dataUrl, msg.format);
       if (sender.tab?.id != null) {
         await sendToTab(sender.tab.id, {
           type: "CS_TOAST",
           title: "Screenshot captured",
-          body: `${msg.width} × ${msg.height} • ${String(msg.format).toUpperCase()}`,
+          body: `${msg.width} × ${msg.height} • ${String(msg.format).toUpperCase()}${clip}`,
         }).catch(() => undefined);
         await maybeReopenPanel(sender.tab.id);
       }
