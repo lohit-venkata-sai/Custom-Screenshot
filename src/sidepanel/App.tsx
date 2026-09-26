@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Camera, Bookmark, Info } from "lucide-react";
+import { Camera, Bookmark } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { CaptureTab } from "./components/CaptureTab";
 import { PresetsTab, EditPresetDialog } from "./components/PresetsTab";
 import { Button } from "./components/ui";
-import { BrandIcon, FormatButton, QualityButton, ThemeIcon } from "./components/parts";
+import { BrandIcon, FormatButton, QualityButton, ThemeIcon, InfoTip } from "./components/parts";
 import { applyTheme } from "../lib/theme";
 import {
   deletePreset,
@@ -19,7 +19,8 @@ import type { CaptureType, Format, Preset, Quality } from "../types";
 import { QUALITY_DIMS } from "../types";
 import { cn } from "../lib/utils";
 
-const QUALITIES: Quality[] = ["1080p", "2K", "4K"];
+const QUALITIES: Quality[] = ["720p", "1080p", "2K", "4K"];
+const LOCKED_QUALITIES: Quality[] = ["4K"];
 
 export default function App() {
   const [tab, setTab] = useState<"capture" | "presets">("capture");
@@ -158,23 +159,11 @@ export default function App() {
             <section>
               <h2 className="text-[17px] font-bold mb-2 flex items-center gap-1.5">
                 Quality (Resolution)
-                <span className="relative inline-flex group">
-                  <button
-                    type="button"
-                    aria-label="About quality options"
-                    aria-describedby="quality-tip"
-                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-border text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none"
-                  >
-                    <Info size={12} />
-                  </button>
-                  <span
-                    role="tooltip"
-                    id="quality-tip"
-                    className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-52 -translate-x-1/2 rounded-xl border border-border bg-card p-2.5 text-[12px] font-normal leading-snug text-muted-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-                  >
-                    Visible shots match your screen. Higher qualities re-render the page denser when possible. Full page saves at full width.
-                  </span>
-                </span>
+                <InfoTip
+                  id="quality-tip"
+                  label="About quality options"
+                  text="Shots match your screen, or render denser for higher qualities. Full page saves at full width."
+                />
               </h2>
               <div className="grid grid-cols-4 gap-2">
                 {QUALITIES.map((q) => (
@@ -183,7 +172,12 @@ export default function App() {
                     active={quality === q}
                     quality={q}
                     sub={QUALITY_DIMS[q]}
+                    locked={LOCKED_QUALITIES.includes(q)}
                     onClick={() => {
+                      if (LOCKED_QUALITIES.includes(q)) {
+                        toast.message("4K is a Pro feature — coming soon");
+                        return;
+                      }
                       setQuality(q);
                       persistConfig(captureType, q, format);
                     }}
@@ -194,17 +188,19 @@ export default function App() {
 
             <section>
               <h2 className="text-[17px] font-bold mb-2">Format</h2>
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-stretch">
                 {(["png", "jpg", "webp"] as Format[]).map((f) => (
                   <FormatButton key={f} active={format === f} format={f} onClick={() => { setFormat(f); persistConfig(captureType, quality, f); }} />
                 ))}
                 {captureType === "fullPage" && (
-                  <FormatButton active={format === "pdf"} format={"pdf" as Format} onClick={() => { setFormat("pdf"); persistConfig(captureType, quality, "pdf"); }} />
+                  <>
+                    <FormatButton active={format === "pdf"} format={"pdf" as Format} onClick={() => { setFormat("pdf"); persistConfig(captureType, quality, "pdf"); }} />
+                    <span className="inline-flex items-center">
+                      <InfoTip id="pdf-tip" label="About PDF format" text="PDF saves the full page as a document." />
+                    </span>
+                  </>
                 )}
               </div>
-              {captureType === "fullPage" && (
-                <p className="mt-1.5 text-[12px] text-muted-foreground">PDF saves the full page as a document.</p>
-              )}
             </section>
 
             <section className="rounded-2xl border border-border bg-card p-3.5">

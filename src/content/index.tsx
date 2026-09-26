@@ -118,10 +118,33 @@ function hideUI() {
   hideFocus();
   uiHidden = true;
   renderBusy();
+  setFocusSuppressed(true);
 }
 function showUI() {
   uiHidden = false;
   renderBusy();
+  setFocusSuppressed(false);
+}
+
+// Browser focus rings (e.g. a focused button/link) are page pixels, so they
+// would be captured. Suppress them for the duration of any capture.
+function setFocusSuppressed(on: boolean) {
+  const id = "cs-focus-killer";
+  if (on) {
+    try {
+      (document.activeElement as HTMLElement | null)?.blur?.();
+    } catch {
+      /* noop */
+    }
+    if (!document.getElementById(id)) {
+      const st = document.createElement("style");
+      st.id = id;
+      st.textContent = `*:focus{outline:none !important;box-shadow:none !important;}*:focus-visible{outline:none !important;box-shadow:none !important;}`;
+      document.head.appendChild(st);
+    }
+  } else {
+    document.getElementById(id)?.remove();
+  }
 }
 
 function flashDim(ms = 180) {
@@ -209,6 +232,7 @@ function cleanupOverlay() {
   document.getElementById("cs-pick-label")?.remove();
   document.body.style.cursor = "";
   document.removeEventListener("keydown", escHandler, true);
+  setFocusSuppressed(false);
   cancelPick = null;
 }
 
@@ -236,6 +260,7 @@ function startPick(mode: "region" | "element") {
     "position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:2147483646;pointer-events:none;cursor:crosshair;";
   document.documentElement.appendChild(overlay);
   document.body.style.cursor = "crosshair";
+  setFocusSuppressed(true);
   document.addEventListener("keydown", escHandler, true);
 
   if (mode === "region") startRegion(overlay);
@@ -572,6 +597,7 @@ function fullpageRestore(scrollY: number) {
     }
   });
   stickySaved = [];
+  setFocusSuppressed(false);
   window.scrollTo(0, scrollY);
 }
 

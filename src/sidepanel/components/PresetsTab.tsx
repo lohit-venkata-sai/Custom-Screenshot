@@ -117,7 +117,7 @@ export function PresetsTab({
       })}
       <div className="rounded-xl border border-border bg-muted/40 p-3 text-[13px] text-muted-foreground flex gap-2">
         <span aria-hidden>ⓘ</span>
-        <span>The preset marked with a star is used by the Capture Button on webpages.</span>
+        <span>The preset with the green tick is used by the Capture Button on webpages.</span>
       </div>
     </div>
   );
@@ -171,17 +171,20 @@ export function EditPresetDialog({
           <div>
             <label className="text-[13px] font-medium">Quality</label>
             <div className="mt-1 flex gap-1">
-              {(["1080p", "2K", "4K"] as Quality[]).map((q) => (
+              {(["720p", "1080p", "2K", "4K"] as Quality[]).map((q) => (
                 <button
                   key={q}
-                  onClick={() => setQuality(q)}
+                  onClick={() => q !== "4K" && setQuality(q)}
+                  aria-disabled={q === "4K"}
+                  title={q === "4K" ? "4K is a Pro feature — coming soon" : q}
                   className={
                     quality === q
                       ? "flex-1 rounded-lg bg-[#2563EB] py-1.5 text-[12px] font-semibold text-white"
-                      : "flex-1 rounded-lg border border-border py-1.5 text-[12px] hover:bg-muted"
+                      : "flex-1 rounded-lg border border-border py-1.5 text-[12px] hover:bg-muted disabled:opacity-60"
                   }
+                  disabled={q === "4K" && quality !== "4K"}
                 >
-                  {q}
+                  {q === "4K" ? "4K 🔒" : q}
                 </button>
               ))}
             </div>

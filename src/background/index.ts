@@ -3,6 +3,7 @@ import { QUALITY_HEIGHT, QUALITY_WIDTH } from "../types";
 import { getActivePreset, getSettings } from "../lib/storage";
 import { formatTimestamp, sanitizeFilename } from "../lib/utils";
 import { extFor } from "../lib/capture";
+import { jpegPagesToPdfDataUrl, type PdfPageImage } from "../lib/pdf";
 
 async function activeTab(): Promise<chrome.tabs.Tab | null> {
   const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
@@ -231,7 +232,7 @@ async function captureFullPageEmu(
     await dbgSend(tabId, "Emulation.clearDeviceMetricsOverride", {}).catch(() => undefined);
     await dbgDetach(tabId);
     await sendToTab(tabId, { type: "CS_FULLPAGE_RESTORE", y: scrollY }).catch(() => undefined);
-    await sendToTab(tabId, { type: "CS_HIDE_UI" }).catch(() => undefined);
+    await sendToTab(tabId, { type: "CS_SHOW_UI" }).catch(() => undefined);
   }
 }
 
@@ -318,7 +319,7 @@ async function captureFullPageScroll(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
         await new Promise((r) => setTimeout(r, 300));
       }
       await sendToTab(tabId, { type: "CS_FULLPAGE_RESTORE", y: scrollY }).catch(() => undefined);
-      await sendToTab(tabId, { type: "CS_HIDE_UI" }).catch(() => undefined);
+      await sendToTab(tabId, { type: "CS_SHOW_UI" }).catch(() => undefined);
     }
   } catch (e) {
     if (zoomUsed !== 1) {
@@ -387,6 +388,22 @@ async function finalizeBitmapSW(
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas unavailable");
   ctx.drawImage(bmp, 0, 0, w, h);
+  if (cfg.format === "pdf") {
+    // Paginate like the page-side writer: single giant pages make
+    // viewers tile/overlap content. Short shots stay one page.
+    const pageH = Math.min(h, Math.max(1, Math.round((w * 297) / 210)));
+    const pages: PdfPageImage[] = [];
+    for (let y = 0; y < h; y += pageH) {
+      const ph = Math.min(pageH, h - y);
+      const pc = new OffscreenCanvas(w, ph);
+      const pctx = pc.getContext("2d");
+      if (!pctx) throw new Error("Canvas unavailable");
+      pctx.drawImage(canvas, 0, y, w, ph, 0, 0, w, ph);
+      const jpg = await pc.convertToBlob({ type: "image/jpeg", quality: 0.92 });
+      pages.push({ jpegDataUrl: await blobToDataUrl(jpg), w, h: ph });
+    }
+    return { dataUrl: jpegPagesToPdfDataUrl(pages), width: w, height: h };
+  }
   const out = await canvas.convertToBlob(
     cfg.format === "png"
       ? { type: "image/png" }

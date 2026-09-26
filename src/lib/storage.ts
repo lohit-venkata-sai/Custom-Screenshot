@@ -20,8 +20,8 @@ const DEFAULT_STORE: StoreShape = {
 };
 
 function normalizeQuality(q: unknown): AppSettings["quality"] {
-  if (q === "1080p" || q === "2K" || q === "4K") return q;
-  return "1080p"; // legacy "480p"/"720p" and anything unknown fall forward
+  if (q === "720p" || q === "1080p" || q === "2K" || q === "4K") return q;
+  return "1080p"; // anything unknown falls forward
 }
 
 function readStore(): Promise<StoreShape> {
