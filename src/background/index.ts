@@ -169,13 +169,22 @@ async function copyToClipboard(dataUrl: string, tabId?: number | null): Promise<
   if (!on) return "off";
   const docErr = await ensureClipboardDoc();
   if (!docErr) {
-    try {
-      const res = await chrome.runtime.sendMessage({ type: "CS_CLIPBOARD_WRITE", dataUrl });
-      if (res?.ok) return "ok";
-      return res?.error ?? "copy rejected";
-    } catch (e) {
-      return e instanceof Error ? e.message : String(e);
+    // The document exists but its script may still be loading — retry the
+    // handshake briefly instead of failing on the first "receiving end" miss.
+    let lastErr = "no response from clipboard writer";
+    for (let i = 0; i < 8; i++) {
+      try {
+        const res = await chrome.runtime.sendMessage({ type: "CS_CLIPBOARD_WRITE", dataUrl });
+        if (res?.ok) return "ok";
+        lastErr = res?.error ?? "copy rejected";
+        break;
+      } catch (e) {
+        lastErr = e instanceof Error ? e.message : String(e);
+        if (!/receiving end|no response|message port closed/i.test(lastErr)) break;
+        await new Promise((r) => setTimeout(r, 350));
+      }
     }
+    return lastErr;
   }
   // No offscreen API (old browser): last resort is a page-context write,
   // which needs the tab focused and may still fail — reported honestly.
