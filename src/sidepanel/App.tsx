@@ -3,6 +3,7 @@ import { Camera, Bookmark } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { CaptureTab } from "./components/CaptureTab";
 import { PresetsTab, EditPresetDialog } from "./components/PresetsTab";
+import { ProModal } from "./components/ProModal";
 import { Button } from "./components/ui";
 import { BrandIcon, FormatButton, QualityButton, ThemeIcon, InfoTip } from "./components/parts";
 import { applyTheme } from "../lib/theme";
@@ -12,6 +13,8 @@ import {
   savePreset,
   saveSettings,
   setActivePreset,
+  trialRemaining4k,
+  TRIAL_DAILY_4K,
   updatePreset,
 } from "../lib/storage";
 import { uid } from "../lib/utils";
@@ -19,8 +22,8 @@ import type { CaptureType, Format, Preset, Quality } from "../types";
 import { QUALITY_DIMS } from "../types";
 import { cn } from "../lib/utils";
 
-const QUALITIES: Quality[] = ["720p", "1080p", "2K", "4K"];
-const LOCKED_QUALITIES: Quality[] = ["4K"];
+const QUALITIES: Quality[] = ["720p", "1080p", "2K", "4K", "8K"];
+const LOCKED_QUALITIES: Quality[] = ["8K"];
 
 export default function App() {
   const [tab, setTab] = useState<"capture" | "presets">("capture");
@@ -33,6 +36,8 @@ export default function App() {
   const [presetName, setPresetName] = useState("");
   const [editing, setEditing] = useState<Preset | null>(null);
   const [busy, setBusy] = useState(false);
+  const [proOpen, setProOpen] = useState(false);
+  const [trialLeft, setTrialLeft] = useState<number>(2);
 
   useEffect(() => {
     getStore().then((s) => {
@@ -44,6 +49,17 @@ export default function App() {
       setTheme(s.settings.theme);
       applyTheme(s.settings.theme);
     });
+    trialRemaining4k().then(setTrialLeft).catch(() => undefined);
+    // Reopened after an exhausted 4K trial: go straight to the upsell.
+    chrome.storage.session
+      ?.get("proModal")
+      .then((r) => {
+        if (r.proModal) {
+          chrome.storage.session.remove("proModal").catch(() => undefined);
+          setProOpen(true);
+        }
+      })
+      .catch(() => undefined);
   }, []);
 
   const persistConfig = useCallback(
@@ -92,8 +108,12 @@ export default function App() {
     fireCapture({ captureType, quality, format });
   };
 
-  const fireCapture = (config: { captureType: CaptureType; quality: Quality; format: Format }) => {
+  const fireCapture = async (config: { captureType: CaptureType; quality: Quality; format: Format }) => {
     if (busy) return;
+    if (config.quality === "4K" && (await trialRemaining4k().catch(() => 1)) <= 0) {
+      setProOpen(true);
+      return;
+    }
     // Fire immediately (no waiting: interactive picks must start at once),
     // then close the panel for a clean shot. Background reopens it when done
     // (only this panel-initiated capture reopens — shortcut/pill captures don't).
@@ -175,7 +195,19 @@ export default function App() {
                     locked={LOCKED_QUALITIES.includes(q)}
                     onClick={() => {
                       if (LOCKED_QUALITIES.includes(q)) {
-                        toast.message("4K is a Pro feature — coming soon");
+                        setProOpen(true);
+                        return;
+                      }
+                      if (q === "4K") {
+                        trialRemaining4k().then((left) => {
+                          setTrialLeft(left);
+                          if (left <= 0) {
+                            setProOpen(true);
+                            return;
+                          }
+                          setQuality(q);
+                          persistConfig(captureType, q, format);
+                        });
                         return;
                       }
                       setQuality(q);
@@ -184,6 +216,11 @@ export default function App() {
                   />
                 ))}
               </div>
+              {trialLeft < TRIAL_DAILY_4K && (
+                <p className="mt-1.5 text-[12px] text-muted-foreground">
+                  4K trial: {trialLeft} of {TRIAL_DAILY_4K} free left today.
+                </p>
+              )}
             </section>
 
             <section>
@@ -193,12 +230,12 @@ export default function App() {
                   <FormatButton key={f} active={format === f} format={f} onClick={() => { setFormat(f); persistConfig(captureType, quality, f); }} />
                 ))}
                 {captureType === "fullPage" && (
-                  <>
-                    <FormatButton active={format === "pdf"} format={"pdf" as Format} onClick={() => { setFormat("pdf"); persistConfig(captureType, quality, "pdf"); }} />
-                    <span className="inline-flex items-center">
-                      <InfoTip id="pdf-tip" label="About PDF format" text="PDF saves the full page as a document." />
-                    </span>
-                  </>
+                  <FormatButton
+                    active={format === "pdf"}
+                    format={"pdf" as Format}
+                    infoTip={{ id: "pdf-tip", label: "About PDF format", text: "PDF saves the full page as a document." }}
+                    onClick={() => { setFormat("pdf"); persistConfig(captureType, quality, "pdf"); }}
+                  />
                 )}
               </div>
             </section>
@@ -274,6 +311,16 @@ export default function App() {
             setPresets(next);
             setEditing(null);
             toast.success("Preset updated");
+          }}
+        />
+      )}
+
+      {proOpen && (
+        <ProModal
+          trialLeft={trialLeft}
+          onClose={() => {
+            setProOpen(false);
+            trialRemaining4k().then(setTrialLeft).catch(() => undefined);
           }}
         />
       )}

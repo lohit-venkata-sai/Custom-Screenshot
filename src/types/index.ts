@@ -1,5 +1,5 @@
 export type CaptureType = "visible" | "fullPage" | "region" | "element";
-export type Quality = "720p" | "1080p" | "2K" | "4K";
+export type Quality = "720p" | "1080p" | "2K" | "4K" | "8K";
 export type Format = "png" | "jpg" | "webp" | "pdf"; // pdf: full-page only
 
 export interface Preset {
@@ -42,6 +42,7 @@ export const QUALITY_HEIGHT: Record<Quality, number> = {
   "1080p": 1080,
   "2K": 1440,
   "4K": 2160,
+  "8K": 4320,
 };
 
 export const QUALITY_DIMS: Record<Quality, string> = {
@@ -49,6 +50,7 @@ export const QUALITY_DIMS: Record<Quality, string> = {
   "1080p": "1920 × 1080",
   "2K": "2560 × 1440",
   "4K": "3840 × 2160",
+  "8K": "7680 × 4320",
 };
 
 /** Full-page target WIDTH per quality — tall pages keep full width, never squeezed. */
@@ -57,4 +59,5 @@ export const QUALITY_WIDTH: Record<Quality, number> = {
   "1080p": 1920,
   "2K": 2560,
   "4K": 3840,
+  "8K": 7680,
 };

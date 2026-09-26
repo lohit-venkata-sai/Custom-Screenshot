@@ -103,7 +103,13 @@ async function onFocusCapture() {
       type: "CS_CAPTURE",
       config: { captureType: cfg.captureType, quality: cfg.quality, format: cfg.format },
     });
-    if (!res?.ok) toast("Capture failed", res?.error ?? "Unknown error", true);
+    if (!res?.ok) {
+      const err =
+        res?.error === "TRIAL_EXHAUSTED"
+          ? "Daily 4K trial used up (2/day) — open Custom Screenshot to go Pro"
+          : (res?.error ?? "Unknown error");
+      toast("Capture failed", err, true);
+    }
     // ok + result null => interactive pick started; pick overlay takes over.
   } catch (err) {
     toast("Capture failed", err instanceof Error ? err.message : String(err), true);

@@ -20,7 +20,7 @@ const DEFAULT_STORE: StoreShape = {
 };
 
 function normalizeQuality(q: unknown): AppSettings["quality"] {
-  if (q === "720p" || q === "1080p" || q === "2K" || q === "4K") return q;
+  if (q === "720p" || q === "1080p" || q === "2K" || q === "4K" || q === "8K") return q;
   return "1080p"; // anything unknown falls forward
 }
 
@@ -105,4 +105,41 @@ export async function saveSettings(patch: Partial<AppSettings>): Promise<AppSett
 
 export async function getStore(): Promise<StoreShape> {
   return readStore();
+}
+
+// ---------- 4K daily trial (2 free shots/day; Pro unlocks unlimited) ----------
+
+export const TRIAL_DAILY_4K = 2;
+
+interface TrialState {
+  date: string; // local day key
+  used4k: number;
+}
+
+function todayKey(): string {
+  return new Date().toDateString();
+}
+
+async function readTrial(): Promise<TrialState> {
+  try {
+    const res = await chrome.storage.local.get(["trial"]);
+    const t = (res.trial ?? {}) as Partial<TrialState>;
+    if (t.date === todayKey()) return { date: t.date, used4k: t.used4k ?? 0 };
+  } catch {
+    /* noop */
+  }
+  return { date: todayKey(), used4k: 0 };
+}
+
+export async function trialRemaining4k(): Promise<number> {
+  const t = await readTrial();
+  return Math.max(0, TRIAL_DAILY_4K - t.used4k);
+}
+
+/** Returns false when today's trial is exhausted (does not consume). */
+export async function consumeTrial4k(): Promise<boolean> {
+  const t = await readTrial();
+  if (t.used4k >= TRIAL_DAILY_4K) return false;
+  await chrome.storage.local.set({ trial: { date: t.date, used4k: t.used4k + 1 } });
+  return true;
 }

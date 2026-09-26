@@ -171,20 +171,20 @@ export function EditPresetDialog({
           <div>
             <label className="text-[13px] font-medium">Quality</label>
             <div className="mt-1 flex gap-1">
-              {(["720p", "1080p", "2K", "4K"] as Quality[]).map((q) => (
+              {(["720p", "1080p", "2K", "4K", "8K"] as Quality[]).map((q) => (
                 <button
                   key={q}
-                  onClick={() => q !== "4K" && setQuality(q)}
-                  aria-disabled={q === "4K"}
-                  title={q === "4K" ? "4K is a Pro feature — coming soon" : q}
+                  onClick={() => q !== "8K" && setQuality(q)}
+                  aria-disabled={q === "8K"}
+                  title={q === "8K" ? "8K is a Pro feature — coming soon" : q}
                   className={
                     quality === q
                       ? "flex-1 rounded-lg bg-[#2563EB] py-1.5 text-[12px] font-semibold text-white"
                       : "flex-1 rounded-lg border border-border py-1.5 text-[12px] hover:bg-muted disabled:opacity-60"
                   }
-                  disabled={q === "4K" && quality !== "4K"}
+                  disabled={q === "8K" && quality !== "8K"}
                 >
-                  {q === "4K" ? "4K 🔒" : q}
+                  {q === "8K" ? "8K 🔒" : q}
                 </button>
               ))}
             </div>

@@ -1,6 +1,7 @@
 import type { CaptureConfig } from "../types";
 import { QUALITY_HEIGHT, QUALITY_WIDTH } from "../types";
 import { getActivePreset, getSettings } from "../lib/storage";
+import { consumeTrial4k, trialRemaining4k } from "../lib/storage";
 import { formatTimestamp, sanitizeFilename } from "../lib/utils";
 import { extFor } from "../lib/capture";
 import { jpegPagesToPdfDataUrl, type PdfPageImage } from "../lib/pdf";
@@ -207,7 +208,7 @@ async function captureFullPageEmu(
     const H = Math.max(1, Math.ceil(lm.contentSize.height));
     if (W <= 0 || H <= 0) throw new Error("Could not measure the page.");
     const dpr = geom?.dpr || 1;
-    const zoomQ = cfg.quality === "4K" ? 2 : cfg.quality === "2K" ? 1.5 : 1;
+    const zoomQ = cfg.quality === "4K" || cfg.quality === "8K" ? 2 : cfg.quality === "2K" ? 1.5 : 1;
     const dsf = Math.max(0.25, Math.min(dpr * zoomQ, 16000 / H, 16000 / W));
     await dbgSend(tabId, "Emulation.setDeviceMetricsOverride", {
       width: W,
@@ -258,7 +259,7 @@ async function captureFullPageScroll(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
   await ensureContent(tabId, tab.url ?? "");
   await sendToTab(tabId, { type: "CS_HIDE_UI" }).catch(() => undefined);
   const prevZoom = await chrome.tabs.getZoom(tabId).catch(() => 1);
-  const zooms = cfg.quality === "4K" ? [2, 1.5, 1] : cfg.quality === "2K" ? [1.5, 1] : [1];
+  const zooms = cfg.quality === "4K" || cfg.quality === "8K" ? [2, 1.5, 1] : cfg.quality === "2K" ? [1.5, 1] : [1];
   let zoomUsed = 1;
   let info = { scrollHeight: 0, viewportH: 1, viewportW: 1, dpr: 1 };
   try {
@@ -532,6 +533,10 @@ async function doCapture(cfg?: CaptureConfig) {
   const config = cfg ?? (await resolveConfig());
   // PDF is a full-page-only format.
   if (config.format === "pdf" && config.captureType !== "fullPage") config.format = "png";
+  // 4K trial gate: 2 free shots/day (PRO: skip when licensed).
+  if (config.quality === "4K" && (await trialRemaining4k()) <= 0) {
+    throw new Error("TRIAL_EXHAUSTED");
+  }
   if (config.captureType === "visible") {
     let res;
     if (await ping(tab.id)) {
@@ -542,11 +547,13 @@ async function doCapture(cfg?: CaptureConfig) {
       // restricted page: capture + resize fully in the service worker
       res = await captureVisibleSW(tab, config);
     }
+    if (config.quality === "4K") await consumeTrial4k();
     await feedback(tab.id, "Screenshot captured", `${res.width} × ${res.height} • ${config.format.toUpperCase()}`);
     return res;
   }
   if (config.captureType === "fullPage") {
     const res = await captureFullPageLoop(tab, config);
+    if (config.quality === "4K") await consumeTrial4k();
     const summary = (res.parts ?? 1) > 1
       ? `${res.parts} parts • ${config.format.toUpperCase()}`
       : `${res.width} × ${res.height} • ${config.format.toUpperCase()}`;
@@ -559,12 +566,14 @@ async function doCapture(cfg?: CaptureConfig) {
   }
   // region / element need user interaction
   await ensureContent(tab.id, tab.url ?? "");
+  if (config.quality === "4K" && tab.id != null) pendingTrial.add(tab.id);
   await sendToTab(tab.id, { type: "CS_START_PICK", mode: config.captureType });
   // open nothing; content script will message back with rect/element then we capture
   return null;
 }
 
 const pendingReopen = new Set<number>();
+const pendingTrial = new Set<number>();
 
 async function maybeReopenPanel(tabId: number | null | undefined) {
   if (tabId == null || !pendingReopen.has(tabId)) return;
@@ -592,7 +601,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         sendResponse({ ok: true, result: res });
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
+        const rawMessage = e instanceof Error ? e.message : String(e);
+        const message =
+          rawMessage === "TRIAL_EXHAUSTED"
+            ? "Daily 4K trial used up (2/day) — open Custom Screenshot to go Pro"
+            : rawMessage;
+        if (rawMessage === "TRIAL_EXHAUSTED") {
+          pendingTrial.delete(tab!.id!);
+          // Ask the reopened panel to show the Pro upsell.
+          try {
+            await chrome.storage.session.set({ proModal: true });
+          } catch {
+            /* noop */
+          }
+        }
         await feedback(tab?.id, "Capture failed", message, true);
         if (fromPanel) {
           pendingReopen.delete(tab!.id!);
@@ -639,6 +661,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ ok: true });
     } else if (msg.type === "CS_FINISH_PICK") {
       // content script selected rect/element screenshot already processed; just download + toast
+      if (sender.tab?.id != null && pendingTrial.has(sender.tab.id)) {
+        pendingTrial.delete(sender.tab.id);
+        await consumeTrial4k();
+      }
       await downloadDataUrl(msg.dataUrl, msg.format);
       if (sender.tab?.id != null) {
         await sendToTab(sender.tab.id, {
@@ -650,7 +676,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       sendResponse({ ok: true });
     } else if (msg.type === "CS_PICK_CANCELLED") {
-      if (sender.tab?.id != null) await maybeReopenPanel(sender.tab.id);
+      if (sender.tab?.id != null) {
+        pendingTrial.delete(sender.tab.id);
+        await maybeReopenPanel(sender.tab.id);
+      }
       sendResponse({ ok: true });
     } else if (msg.type === "CS_OPEN_PANEL") {
       const tab = sender.tab ?? (await activeTab());
@@ -677,7 +706,12 @@ chrome.commands.onCommand.addListener(async (command) => {
     try {
       await doCapture();
     } catch (e) {
-      await feedback(tab?.id, "Capture failed", e instanceof Error ? e.message : String(e), true);
+      const rawMessage = e instanceof Error ? e.message : String(e);
+      const message =
+        rawMessage === "TRIAL_EXHAUSTED"
+          ? "Daily 4K trial used up (2/day) — open Custom Screenshot to go Pro"
+          : rawMessage;
+      await feedback(tab?.id, "Capture failed", message, true);
     } finally {
       if (tab?.id != null) {
         await sendToTab(tab.id, { type: "CS_BUSY", on: false }).catch(() => undefined);

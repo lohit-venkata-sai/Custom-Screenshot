@@ -97,24 +97,39 @@ export function QualityButton({
 export function FormatButton({
   active,
   format,
+  infoTip,
   onClick,
 }: {
   active: boolean;
   format: Format;
+  infoTip?: { id: string; label: string; text: string };
   onClick: () => void;
 }) {
   return (
-    <button
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "flex-1 rounded-xl border px-2 py-2.5 text-sm font-semibold transition-colors",
-        active
-          ? "bg-[#2563EB] border-[#2563EB] text-white dark:bg-[#3B82F6] dark:border-[#3B82F6]"
-          : "bg-card border-border text-foreground hover:bg-muted"
+    <span className="relative inline-flex flex-1 group">
+      <button
+        onClick={onClick}
+        aria-pressed={active}
+        aria-describedby={infoTip?.id}
+        className={cn(
+          "flex-1 rounded-xl border px-2 py-2.5 text-sm font-semibold transition-colors inline-flex items-center justify-center gap-1.5",
+          active
+            ? "bg-[#2563EB] border-[#2563EB] text-white dark:bg-[#3B82F6] dark:border-[#3B82F6]"
+            : "bg-card border-border text-foreground hover:bg-muted"
+        )}
+      >
+        {format.toUpperCase()}
+        {infoTip && <Info size={12} className="opacity-70" aria-hidden />}
+      </button>
+      {infoTip && (
+        <span
+          role="tooltip"
+          id={infoTip.id}
+          className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-52 -translate-x-1/2 rounded-xl border border-border bg-card p-2.5 text-[12px] font-normal leading-snug text-muted-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+        >
+          {infoTip.text}
+        </span>
       )}
-    >
-      {format.toUpperCase()}
-    </button>
+    </span>
   );
 }
