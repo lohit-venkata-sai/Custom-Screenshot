@@ -94,7 +94,7 @@ export async function clearLocalPro(): Promise<void> {
 // 3. Paste the client ID below AND into manifest.json's oauth2.client_id.
 // 4. At Web Store publish the extension ID changes → repeat step 2 for it.
 
-export const GOOGLE_CLIENT_ID = "YOUR-GOOGLE-CLIENT-ID.apps.googleusercontent.com";
+export const GOOGLE_CLIENT_ID = "578950807331-nadm1i72mdqupt88mntt9apket8n2q2n.apps.googleusercontent.com";
 
 async function googleEmail(interactive: boolean): Promise<string | null> {
   if (GOOGLE_CLIENT_ID.startsWith("YOUR-")) return null;

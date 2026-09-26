@@ -20,7 +20,7 @@
   },
   "permissions": ["storage", "downloads", "activeTab", "scripting", "sidePanel", "notifications", "debugger", "identity"],
   "oauth2": {
-    "client_id": "YOUR-GOOGLE-CLIENT-ID.apps.googleusercontent.com",
+    "client_id": "578950807331-nadm1i72mdqupt88mntt9apket8n2q2n.apps.googleusercontent.com",
     "scopes": ["openid", "email", "profile"]
   },
   "host_permissions": ["<all_urls>"],
