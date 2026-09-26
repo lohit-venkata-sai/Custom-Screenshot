@@ -4,3 +4,6 @@ dist/
 .DS_Store
 
 site/
+
+*.zip
+dist.zip
