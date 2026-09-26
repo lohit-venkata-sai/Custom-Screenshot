@@ -86,6 +86,12 @@ async function captureVisibleRateLimited(windowId: number | undefined, jpeg: boo
   }
 }
 
+function u8ToBlob(bytes: Uint8Array, mime: string): Blob {
+  const copy = new Uint8Array(bytes.length);
+  copy.set(bytes);
+  return new Blob([copy.buffer as ArrayBuffer], { type: mime });
+}
+
 /** Page toast when possible, OS notification otherwise (restricted pages can't run content). */
 async function feedback(tabId: number | null | undefined, title: string, body: string, error = false) {
   if (tabId != null) {
@@ -132,6 +138,33 @@ async function withOverlayHidden<T>(tabId: number, fn: () => Promise<T>): Promis
 async function captureVisiblePreset(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
   if (tab.id == null) throw new Error("No active tab");
   await ensureContent(tab.id, tab.url ?? "");
+  // Augustat path: re-render the same viewport at higher density when the
+  // screen alone can't reach the requested quality. Falls back silently.
+  const geom = await pageGeom(tab.id);
+  const targetH = QUALITY_HEIGHT[cfg.quality];
+  const boost = geom ? boostFor(geom.viewportH, geom.dpr || 1, targetH) : 1;
+  if (geom && boost > 1) {
+    try {
+      const res = await withOverlayHidden(tab.id, async () => {
+        const shot = await emuCaptureViewport(
+          tab.id!,
+          geom.viewportW,
+          geom.viewportH,
+          (geom.dpr || 1) * boost
+        );
+        const bmp = await createImageBitmap(u8ToBlob(shot.bytes, shot.mime));
+        try {
+          return await finalizeBitmapSW(bmp, cfg);
+        } finally {
+          bmp.close();
+        }
+      });
+      await downloadDataUrl(res.dataUrl, cfg.format);
+      return res;
+    } catch {
+      /* fall through to classic path */
+    }
+  }
   const res = await withOverlayHidden(tab.id, async () => {
     const raw = await captureVisibleRateLimited(tab.windowId, false);
     return sendToTab<{ dataUrl: string; width: number; height: number }>(tab.id!, {
@@ -145,10 +178,81 @@ async function captureVisiblePreset(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
   return res;
 }
 
+// Full page, primary: emulate the full content size at high density and take
+// ONE shot (Augustat technique via debugger). Falls back to scroll+stitch
+// wherever Chrome blocks the debugger.
+async function captureFullPageEmu(
+  tab: chrome.tabs.Tab,
+  cfg: CaptureConfig,
+  geom: PageGeom | null
+) {
+  const tabId = tab.id!;
+  await sendToTab(tabId, { type: "CS_HIDE_UI" }).catch(() => undefined);
+  // Wake lazy-loaded content with a quick scroll-through (no captures, no quota).
+  const scrollY = await sendToTab<number>(tabId, { type: "CS_GET_SCROLL" }).catch(() => 0);
+  if (geom && geom.scrollHeight > geom.viewportH) {
+    for (let y = 0; y < geom.scrollHeight; y += Math.max(1, geom.viewportH)) {
+      await sendToTab(tabId, { type: "CS_SCROLL_TO", y }).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 120));
+    }
+  }
+  await sendToTab(tabId, { type: "CS_STICKY_REL" }).catch(() => undefined);
+  await dbgAttach(tabId);
+  try {
+    const lm = (await dbgSend(tabId, "Page.getLayoutMetrics", {})) as {
+      contentSize: { x: number; y: number; width: number; height: number };
+    };
+    const W = Math.max(1, Math.ceil(lm.contentSize.width));
+    const H = Math.max(1, Math.ceil(lm.contentSize.height));
+    if (W <= 0 || H <= 0) throw new Error("Could not measure the page.");
+    const dpr = geom?.dpr || 1;
+    const zoomQ = cfg.quality === "4K" ? 2 : cfg.quality === "2K" ? 1.5 : 1;
+    const dsf = Math.max(0.25, Math.min(dpr * zoomQ, 16000 / H, 16000 / W));
+    await dbgSend(tabId, "Emulation.setDeviceMetricsOverride", {
+      width: W,
+      height: H,
+      deviceScaleFactor: dsf,
+      mobile: false,
+      screenOrientation:
+        W >= H ? { angle: 0, type: "landscapePrimary" } : { angle: 0, type: "portraitPrimary" },
+    });
+    await new Promise((r) => setTimeout(r, 400));
+    const shot = await dbgShot(tabId);
+    await dbgSend(tabId, "Emulation.clearDeviceMetricsOverride", {}).catch(() => undefined);
+    const bmp = await createImageBitmap(u8ToBlob(shot.bytes, shot.mime));
+    try {
+      const final = await finalizeBitmapSW(bmp, cfg, "width");
+      await downloadDataUrl(final.dataUrl, cfg.format);
+      return { ...final, parts: 1 };
+    } finally {
+      bmp.close();
+    }
+  } finally {
+    await dbgSend(tabId, "Emulation.clearDeviceMetricsOverride", {}).catch(() => undefined);
+    await dbgDetach(tabId);
+    await sendToTab(tabId, { type: "CS_FULLPAGE_RESTORE", y: scrollY }).catch(() => undefined);
+    await sendToTab(tabId, { type: "CS_HIDE_UI" }).catch(() => undefined);
+  }
+}
+
+async function captureFullPageLoop(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
+  const tabId = tab.id!;
+  await ensureContent(tabId, tab.url ?? "");
+  const geom = await pageGeom(tabId);
+  try {
+    return await captureFullPageEmu(tab, cfg, geom);
+  } catch (e) {
+    if (e instanceof Error && /DBG_ATTACHED_ELSEWHERE/.test(e.message)) {
+      throw new Error("Close DevTools (F12) and try again — only one debugger can run at a time.");
+    }
+    return captureFullPageScroll(tab, cfg);
+  }
+}
+
 // Full page WITHOUT debugger: scroll + capture + stitch in the page.
 // Sticky laid into flow and fixed pinned to absolute offsets (GoFullPage-style),
 // so each segment contributes fresh content exactly once — one image file.
-async function captureFullPageLoop(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
+async function captureFullPageScroll(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
   const tabId = tab.id!;
   await ensureContent(tabId, tab.url ?? "");
   await sendToTab(tabId, { type: "CS_HIDE_UI" }).catch(() => undefined);
@@ -266,10 +370,17 @@ async function captureVisibleSW(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
 /** Resize + encode a captured bitmap in the service worker; never upscales. */
 async function finalizeBitmapSW(
   bmp: ImageBitmap,
-  cfg: CaptureConfig
+  cfg: CaptureConfig,
+  fit: "height" | "width" = "height"
 ): Promise<{ dataUrl: string; width: number; height: number }> {
-  const targetH = QUALITY_HEIGHT[cfg.quality];
-  const scale = targetH < bmp.height ? targetH / bmp.height : 1;
+  let scale: number;
+  if (fit === "width") {
+    // Full pages keep full WIDTH (never squeezed); height follows aspect.
+    scale = Math.min(1, QUALITY_WIDTH[cfg.quality] / bmp.width, 16384 / bmp.height);
+  } else {
+    const targetH = QUALITY_HEIGHT[cfg.quality];
+    scale = targetH < bmp.height ? targetH / bmp.height : 1;
+  }
   const w = Math.max(1, Math.round(bmp.width * scale));
   const h = Math.max(1, Math.round(bmp.height * scale));
   const canvas = new OffscreenCanvas(w, h);
@@ -283,6 +394,117 @@ async function finalizeBitmapSW(
   );
   const dataUrl = await blobToDataUrl(out);
   return { dataUrl, width: w, height: h };
+}
+
+// ---------- debugger + Augustat-style density emulation ----------
+// Renders the page at extra device pixels per CSS pixel (like DevTools'
+// custom-device DPR trick), so captures carry genuine detail instead of
+// upscaled pixels. Only where Chrome allows the debugger; callers fall back.
+
+function dbgSend(tabId: number, method: string, params: Record<string, unknown>): Promise<any> {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand({ tabId }, method, params, (res) => {
+      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+      else resolve(res);
+    });
+  });
+}
+
+async function dbgAttach(tabId: number): Promise<void> {
+  try {
+    await new Promise<void>((resolve, reject) => {
+      chrome.debugger.attach({ tabId }, "1.3", () => {
+        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+        else resolve();
+      });
+    });
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    if (/another debugger/i.test(m)) {
+      throw new Error("DBG_ATTACHED_ELSEWHERE");
+    }
+    throw new Error(`DBG_BLOCKED:${m}`);
+  }
+}
+
+async function dbgDetach(tabId: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    chrome.debugger.detach({ tabId }, () => resolve());
+  });
+}
+
+/** Viewport screenshot at emulated density; PNG first, JPEG fallback. */
+async function dbgShot(tabId: number, extra: Record<string, unknown> = {}): Promise<{ bytes: Uint8Array; mime: string }> {
+  const attempt = async (format: string, quality?: number) => {
+    const res = (await dbgSend(tabId, "Page.captureScreenshot", {
+      format,
+      ...(quality != null ? { quality } : {}),
+      fromSurface: true,
+      ...extra,
+    })) as { data: string };
+    return Uint8Array.from(atob(res.data), (c) => c.charCodeAt(0));
+  };
+  try {
+    return { bytes: await attempt("png"), mime: "image/png" };
+  } catch (e) {
+    if (!isSizeError(e)) throw e;
+    return { bytes: await attempt("jpeg", 92), mime: "image/jpeg" };
+  }
+}
+
+function isSizeError(e: unknown): boolean {
+  const m = e instanceof Error ? e.message : String(e);
+  return /unable to capture|too large|exceed|limit|memory|texture/i.test(m);
+}
+
+interface PageGeom {
+  viewportW: number;
+  viewportH: number;
+  dpr: number;
+  scrollHeight: number;
+}
+
+async function pageGeom(tabId: number): Promise<PageGeom | null> {
+  try {
+    const m = await sendToTab<PageGeom>(tabId, { type: "CS_FULLPAGE_METRICS" });
+    if (m.viewportW > 0 && m.viewportH > 0) return m;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Density multiplier so device pixels reach the quality target (max 4×). 1 = screen already suffices. */
+function boostFor(cssH: number, dpr: number, targetH: number): number {
+  const devH = Math.max(1, cssH) * Math.max(0.5, dpr);
+  if (devH >= targetH) return 1;
+  return Math.min(4, targetH / devH);
+}
+
+async function emuCaptureViewport(
+  tabId: number,
+  cssW: number,
+  cssH: number,
+  dsf: number
+): Promise<{ bytes: Uint8Array; mime: string }> {
+  await dbgAttach(tabId);
+  try {
+    await dbgSend(tabId, "Emulation.setDeviceMetricsOverride", {
+      width: Math.max(1, Math.round(cssW)),
+      height: Math.max(1, Math.round(cssH)),
+      deviceScaleFactor: dsf,
+      mobile: false,
+      screenOrientation:
+        cssW >= cssH
+          ? { angle: 0, type: "landscapePrimary" }
+          : { angle: 0, type: "portraitPrimary" },
+    });
+    await new Promise((r) => setTimeout(r, 350));
+    return await dbgShot(tabId);
+  } finally {
+    await dbgSend(tabId, "Emulation.clearDeviceMetricsOverride", {}).catch(() => undefined);
+    await dbgDetach(tabId);
+  }
 }
 
 // ---------- debugger protocol helpers (unused: full page is debugger-free) ----------
@@ -375,6 +597,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!tab?.windowId && tab?.windowId !== 0) throw new Error("No tab");
       const raw = await captureVisibleRateLimited(tab!.windowId, false);
       sendResponse({ ok: true, raw });
+    } else if (msg.type === "CS_CAPTURE_BOOSTED_VISIBLE") {
+      // Re-render the viewport at higher density for region/element crops.
+      // Throws when pointless (screen suffices) or blocked — caller falls back.
+      const tab = sender.tab ?? (await activeTab());
+      if (!tab || tab.id == null) throw new Error("No tab");
+      const geom = await pageGeom(tab.id);
+      if (!geom) throw new Error("no geometry");
+      const targetH = QUALITY_HEIGHT[(msg.quality as CaptureConfig["quality"]) ?? "1080p"];
+      const boost = boostFor(geom.viewportH, geom.dpr || 1, targetH);
+      if (boost <= 1) throw new Error("screen suffices");
+      const res = await withOverlayHidden(tab.id, async () => {
+        const shot = await emuCaptureViewport(
+          tab.id!,
+          geom.viewportW,
+          geom.viewportH,
+          (geom.dpr || 1) * boost
+        );
+        return blobToDataUrl(u8ToBlob(shot.bytes, shot.mime));
+      });
+      sendResponse({ ok: true, raw: res });
     } else if (msg.type === "CS_DOWNLOAD") {
       await downloadDataUrl(msg.dataUrl, msg.format);
       sendResponse({ ok: true });

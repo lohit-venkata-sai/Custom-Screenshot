@@ -172,7 +172,7 @@ export default function App() {
                     id="quality-tip"
                     className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-52 -translate-x-1/2 rounded-xl border border-border bg-card p-2.5 text-[12px] font-normal leading-snug text-muted-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
                   >
-                    Visible shots match your screen. Full page saves at full width. Higher quality is sharper but larger.
+                    Visible shots match your screen. Higher qualities re-render the page denser when possible. Full page saves at full width.
                   </span>
                 </span>
               </h2>

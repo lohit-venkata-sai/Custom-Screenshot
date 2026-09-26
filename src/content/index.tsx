@@ -318,7 +318,7 @@ function startRegion(overlay: HTMLElement) {
       // let the browser repaint without our overlay before capturing
       await new Promise((r) => setTimeout(r, 120));
       const cfg = await readActiveConfig();
-      const raw = await requestRaw();
+      const raw = (await requestBoosted(cfg.quality)) ?? (await requestRaw());
       const cropped = await cropDataUrl(raw, { x, y, width: w, height: h }, cfg.quality, cfg.format);
       await chrome.runtime.sendMessage({
         type: "CS_FINISH_PICK",
@@ -392,7 +392,7 @@ function startElement(overlay: HTMLElement) {
     try {
       await new Promise((res) => setTimeout(res, 120));
       const cfg = await readActiveConfig();
-      const raw = await requestRaw();
+      const raw = (await requestBoosted(cfg.quality)) ?? (await requestRaw());
       const cropped = await cropDataUrl(
         raw,
         { x: Math.max(0, r.x), y: Math.max(0, r.y), width: w, height: h },
@@ -446,6 +446,20 @@ function requestRaw(): Promise<string> {
       if (res?.ok) resolve(res.raw);
       else reject(new Error(res?.error ?? "Capture failed"));
     });
+  });
+}
+
+/** Density-boosted viewport shot for crops; null when pointless or blocked. */
+function requestBoosted(quality: Quality): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ type: "CS_CAPTURE_BOOSTED_VISIBLE", quality }, (res) => {
+        if (chrome.runtime.lastError || !res?.ok) resolve(null);
+        else resolve(res.raw as string);
+      });
+    } catch {
+      resolve(null);
+    }
   });
 }
 
