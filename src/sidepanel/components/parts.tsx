@@ -1,5 +1,5 @@
 import { Monitor, FileText, Crop, MousePointerClick, Sun, Moon, Info, Lock } from "lucide-react";
-import logoUrl from "../../assets/logo.png";
+import logoUrl from "../../assets/custom-screenshot-logo.png";
 import { cn } from "../../lib/utils";
 import type { CaptureType, Format, Preset, Quality } from "../../types";
 

@@ -20,6 +20,7 @@ import {
 } from "../lib/storage";
 import { isPro, fetchProUser } from "../lib/pro";
 import { uid } from "../lib/utils";
+import { APP_VERSION } from "../lib/version";
 import type { CaptureType, Format, Preset, Quality } from "../types";
 import { QUALITY_DIMS } from "../types";
 import { cn } from "../lib/utils";
@@ -374,6 +375,10 @@ export default function App() {
           </>
         )}
       </main>
+
+      <footer className="pb-3 text-center text-[11px] text-muted-foreground">
+        Custom Screenshot v{APP_VERSION}
+      </footer>
 
       {editing && (
         <EditPresetDialog
