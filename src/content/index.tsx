@@ -785,12 +785,40 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         break;
       case "CS_CLIPBOARD_WRITE_PAGE": {
         // Last-resort copy for browsers without the offscreen API.
-        // Needs a focused tab; failures are reported, never silent.
+        // Tries clipboard.write, then the focus-free img+execCommand trick.
         try {
           const blob = await (await fetch(msg.dataUrl as string)).blob();
-          await navigator.clipboard.write([
-            new ClipboardItem({ [blob.type || "image/png"]: blob }),
-          ]);
+          try {
+            await navigator.clipboard.write([
+              new ClipboardItem({ [blob.type || "image/png"]: blob }),
+            ]);
+          } catch (e) {
+            const url = URL.createObjectURL(blob);
+            try {
+              const img = document.createElement("img");
+              img.src = url;
+              img.style.cssText = "position:fixed;top:0;left:0;";
+              document.documentElement.appendChild(img);
+              try {
+                await img.decode();
+              } catch (_) {
+                /* proceed anyway */
+              }
+              const range = document.createRange();
+              range.selectNode(img);
+              const sel = window.getSelection();
+              if (sel) {
+                sel.removeAllRanges();
+                sel.addRange(range);
+              }
+              const ok = document.execCommand("copy");
+              if (sel) sel.removeAllRanges();
+              img.remove();
+              if (!ok) throw new Error("execCommand copy returned false: " + (e as Error).message);
+            } finally {
+              URL.revokeObjectURL(url);
+            }
+          }
           sendResponse({ ok: true });
         } catch (e) {
           sendResponse({ ok: false, error: e instanceof Error ? e.message : String(e) });
