@@ -85,43 +85,59 @@ export async function clearLocalPro(): Promise<void> {
   }
 }
 
-// ---------- Google sign-in (chrome.identity, for trial binding) ----------
-// Free, no backend. Owner setup (once, ~10 min):
-// 1. https://console.cloud.google.com → new project → OAuth consent screen
-//    (External, add openid/email/profile scopes).
-// 2. Credentials → Create → OAuth client ID → Application type "Chrome",
-//    paste THIS extension's ID from chrome://extensions.
-// 3. Paste the client ID below AND into manifest.json's oauth2.client_id.
-// 4. At Web Store publish the extension ID changes → repeat step 2 for it.
+// ---------- Google sign-in (works in Chrome, Brave, Edge, …) ----------
+// Technique mirrored from shipping extensions: OAuth *Web application*
+// client + chrome.identity.launchWebAuthFlow (NOT getAuthToken, which only
+// works in real Chrome). Owner setup (once, ~10 min):
+// 1. https://console.cloud.google.com → same project → Credentials →
+//    Create → OAuth client ID → Application type "Web application".
+// 2. Under "Authorised redirect URIs" add:
+//      https://fiebdpbddphcaamlpefjpllacdmacecb.chromiumapp.org/
+//    (your extension ID from chrome://extensions; add the Web Store ID too
+//    at publish — Web clients allow many redirect URIs.)
+// 3. Paste the Web client ID below.
 
 export const GOOGLE_CLIENT_ID = "578950807331-nadm1i72mdqupt88mntt9apket8n2q2n.apps.googleusercontent.com";
+export const GOOGLE_WEB_CLIENT_ID = "YOUR-WEB-CLIENT-ID.apps.googleusercontent.com";
 
-async function googleEmail(interactive: boolean): Promise<string | null> {
-  if (GOOGLE_CLIENT_ID.startsWith("YOUR-")) return null;
-  const token: string = await new Promise((resolve, reject) => {
-    chrome.identity.getAuthToken({ interactive }, (t) => {
-      if (chrome.runtime.lastError || !t) reject(new Error(chrome.runtime.lastError?.message ?? "no token"));
-      else resolve(t as string);
+/** Interactive Google sign-in via auth popup. Throws when unconfigured/cancelled. */
+export async function signInWithGoogle(): Promise<string> {
+  if (GOOGLE_WEB_CLIENT_ID.startsWith("YOUR-")) throw new Error("NOT_CONFIGURED");
+  const redirectUri = chrome.identity.getRedirectURL();
+  const scopes = [
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+  ];
+  const url =
+    "https://accounts.google.com/o/oauth2/v2/auth?client_id=" +
+    encodeURIComponent(GOOGLE_WEB_CLIENT_ID) +
+    "&response_type=token&redirect_uri=" +
+    encodeURIComponent(redirectUri) +
+    "&scope=" +
+    encodeURIComponent(scopes.join(" "));
+  const responseUrl: string = await new Promise((resolve, reject) => {
+    chrome.identity.launchWebAuthFlow({ url, interactive: true }, (u) => {
+      if (chrome.runtime.lastError || !u) {
+        reject(new Error(chrome.runtime.lastError?.message ?? "cancelled"));
+      } else {
+        resolve(u as string);
+      }
     });
   });
+  const token = new URLSearchParams(new URL(responseUrl).hash.substring(1)).get("access_token");
+  if (!token) throw new Error("NO_TOKEN");
   const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error("userinfo failed");
   const info = (await res.json()) as { email?: string };
-  return info.email ?? null;
-}
-
-/** Interactive Google sign-in (account picker). Throws when unconfigured/cancelled. */
-export async function signInWithGoogle(): Promise<string> {
-  const email = await googleEmail(true);
-  if (!email) throw new Error("NO_EMAIL");
+  if (!info.email) throw new Error("NO_EMAIL");
   try {
-    await chrome.storage.local.set({ trialEmail: email });
+    await chrome.storage.local.set({ trialEmail: info.email });
   } catch {
     /* noop */
   }
-  return email;
+  return info.email;
 }
 
 /**
@@ -138,19 +154,6 @@ export async function getTrialIdentity(): Promise<string | null> {
     }
   } catch {
     /* noop */
-  }
-  try {
-    const email = await googleEmail(false);
-    if (email) {
-      try {
-        await chrome.storage.local.set({ trialEmail: email });
-      } catch {
-        /* noop */
-      }
-      return email;
-    }
-  } catch {
-    /* not granted / offline */
   }
   try {
     const user = await fetchProUser();
