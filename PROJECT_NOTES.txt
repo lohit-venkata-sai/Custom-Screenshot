@@ -1,0 +1,66 @@
+CUSTOM SCREENSHOT — PROJECT NOTES (V1)
+==========================================
+Chrome MV3 extension: configure once, capture instantly.
+Stack: React + TypeScript + Vite + Tailwind + shadcn-style tokens + lucide + CRXJS.
+Build: npm run build -> dist/ (load unpacked). Git branch: main.
+
+SOURCE LAYOUT (src/)
+- background/index.ts — service worker: capture orchestration, downloads,
+  keyboard shortcut, trial/Pro gates, toasts/notifications fallback.
+- content/index.tsx — Shadow-DOM UI: glass capture pill, region/element
+  pickers, full-page stitch, toasts, busy indicator, clipboard copy.
+- sidepanel/ — Capture tab, Presets tab, ProModal (login/upsell),
+  ProfileDialog, per-preset capture buttons, light/dark theme.
+- lib/capture.ts — resize/encode/crop engine (never upscales).
+- lib/pdf.ts — dependency-free multi-page PDF writer.
+- lib/storage.ts — presets, settings, trial counters (per identity email).
+- lib/pro.ts — Pro licensing (ExtensionPay + Google sign-in helpers).
+- lib/extpay/ — vendored ExtPay.js (MV3 forbids remote code).
+- lib/theme.ts, lib/utils.ts, types/index.ts.
+
+FEATURES (V1)
+- Capture types: visible, full page (scroll+stitch, sticky->relative,
+  fixed pinned to absolute, clamped scrolls, per-segment offsets),
+  region (drag+dimensions), element (hover label, Alt=parent, full-element
+  scroll-stitch when taller than viewport).
+- Quality: 720p/1080p/2K + 4K/8K (gold border = premium). Density emulation
+  (Augustat technique) via debugger where allowed, fallbacks elsewhere.
+- Formats: PNG/JPG/WebP (+ PDF for full page, paginated A4-ratio).
+- Presets with one active; per-preset capture buttons; first preset auto-active.
+- Floating glass pill (toolbar click), arrow opens side panel only.
+- Shortcut Alt+Shift+S (remappable to Ctrl+Alt+S).
+- Toasts: page top-center + sonner in panel (closable).
+- Clipboard copy toggle (profile settings).
+- Light/dark theme; a11y labels, focus states, Esc cancels everything.
+
+MONETIZATION STATE
+- 4K + 8K: 2 free shots/day each, bound to signed-in identity.
+- Sign-in: Google OAuth web-flow (works Chrome+Brave) + email-link fallback.
+  ExtensionPay ID: custom-screenshot. PAYMENTS_LIVE=false (flip when live).
+- Google Cloud: OAuth clients exist (Chrome-type + Web-type).
+  Dev extension ID: bmnookhlomoadfgpooiijdljclapkkke (redirect URIs per ID!).
+- Stripe: BLOCKED in India (invite-only) — ExtensionPay paused.
+- Plan: Razorpay + Cloudflare Worker for licensing (UPI works). Status: NOT
+  STARTED — needs Razorpay test Key ID + Secret from owner.
+- Prices decided: Pro $9 one-time ("Pixel Pro"); bulk screenshots later = Pro+ $19.
+- Policy pages (privacy/refund/contact): in site/ — PRIVATE, not in repo.
+
+PENDING / NEXT VERSION
+- Server-side trial metering (Worker+KV) to close reinstall loophole.
+- Razorpay checkout + license verification; flip PAYMENTS_LIVE.
+- Store publish (free first) -> new extension ID -> update OAuth redirect URIs.
+- Bulk screenshots = Pro+ tier.
+- Known limits: chrome://, Web Store, other-extension pages unscriptable
+  (visible capture still works there via SW fallback); DevTools open blocks
+  debugger path (auto-fallback); huge pages capped for canvas safety.
+
+CREDENTIALS / IDS (owner holds secrets — never commit them)
+- ExtensionPay extension: custom-screenshot
+- Google OAuth clients in owner's Cloud project (IDs in git history: chore
+  commits; Web client redirect per extension ID).
+- Discord: https://discord.gg/M4kAbUJbS (DISCORD_URL in parts.tsx).
+
+TESTING
+- Reload dist/ at chrome://extensions, refresh test tabs.
+- Trial: sign in -> 2x 4K -> 3rd opens upsell. Esc cancels picks.
+- Full page: long pages, sticky headers, fixed bars, footer duplication check.
