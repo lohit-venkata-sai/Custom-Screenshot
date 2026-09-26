@@ -121,8 +121,9 @@ export function openPaymentPage(): void {
   client().openPaymentPage();
 }
 
+/** Magic-link sign-in works regardless of payments going live. */
 export function openLoginPage(): void {
-  if (!EXTPAY_CONFIGURED || !PAYMENTS_LIVE) throw new Error("NOT_LIVE");
+  if (!EXTPAY_CONFIGURED) throw new Error("NOT_CONFIGURED");
   client().openLoginPage();
 }
 
