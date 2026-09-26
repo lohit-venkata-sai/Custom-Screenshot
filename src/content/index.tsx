@@ -119,6 +119,9 @@ function hideUI() {
   uiHidden = true;
   renderBusy();
   setFocusSuppressed(true);
+  // A previous toast/pill must never leak into the next shot.
+  shadow?.getElementById("cs-toast")?.remove();
+  shadow?.getElementById("cs-focus")?.remove();
 }
 function showUI() {
   uiHidden = false;
@@ -127,15 +130,11 @@ function showUI() {
 }
 
 // Browser focus rings (e.g. a focused button/link) are page pixels, so they
-// would be captured. Suppress them for the duration of any capture.
+// would be captured. Adjusted purely through CSS: a temporary stylesheet
+// kills outlines while a capture runs, removed afterwards.
 function setFocusSuppressed(on: boolean) {
   const id = "cs-focus-killer";
   if (on) {
-    try {
-      (document.activeElement as HTMLElement | null)?.blur?.();
-    } catch {
-      /* noop */
-    }
     if (!document.getElementById(id)) {
       const st = document.createElement("style");
       st.id = id;
