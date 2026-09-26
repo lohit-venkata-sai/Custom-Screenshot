@@ -222,7 +222,15 @@ async function copyReport(
   dataUrl: string,
   format: string
 ): Promise<string> {
-  if (format === "pdf") return "";
+  if (format === "pdf") {
+    let on = false;
+    try {
+      on = (await getSettings()).clipboard === true;
+    } catch {
+      /* noop */
+    }
+    return on ? " · clipboard skipped for PDF" : "";
+  }
   const r = await copyToClipboard(dataUrl, tabId);
   if (r === "ok") return " · copied";
   if (r !== "off") await feedback(tabId, "Clipboard copy failed", r, true);
@@ -799,8 +807,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await maybeReopenPanel(sender.tab.id);
       }
       sendResponse({ ok: true });
-    } else if (msg.type === "CS_PICK_CANCELLED") {
-      if (sender.tab?.id != null) {
+    } else if (msg.type === "CS_PICK_CANCELLED") {      if (sender.tab?.id != null) {
         pendingTrial.delete(sender.tab.id);
         await maybeReopenPanel(sender.tab.id);
       }
@@ -809,6 +816,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const tab = sender.tab ?? (await activeTab());
       await openPanelForTab(tab?.id);
       sendResponse({ ok: true });
+    } else if (msg.type === "CS_CLIPBOARD_TEST") {
+      // Self-test: 1px PNG through the real pipeline. Isolates clipboard
+      // from capture so failures point at the environment, not the flow.
+      const tab = await activeTab().catch(() => null);
+      const c = new OffscreenCanvas(1, 1);
+      const cx = c.getContext("2d");
+      if (!cx) throw new Error("canvas unavailable");
+      cx.fillStyle = "#2563EB";
+      cx.fillRect(0, 0, 1, 1);
+      const blob = await c.convertToBlob({ type: "image/png" });
+      const dataUrl = await blobToDataUrl(blob);
+      const r = await copyToClipboard(dataUrl, tab?.id ?? null);
+      sendResponse({ ok: r === "ok", detail: r });
     }
   })()
     .catch((e) => {

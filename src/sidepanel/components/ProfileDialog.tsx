@@ -110,6 +110,24 @@ export function ProfileDialog({
             />
           </button>
         </label>
+        {clipboard && (
+          <button
+            onClick={() => {
+              chrome.runtime
+                .sendMessage({ type: "CS_CLIPBOARD_TEST" })
+                .then((res: { ok?: boolean; detail?: string } | undefined) => {
+                  if (res?.ok) toast.success("Clipboard test passed — try pasting now");
+                  else toast.error(`Clipboard test failed: ${res?.detail ?? "no response"}`);
+                })
+                .catch((e: unknown) =>
+                  toast.error(`Clipboard test failed: ${e instanceof Error ? e.message : String(e)}`)
+                );
+            }}
+            className="mt-2 w-full rounded-lg border border-border py-2 text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            Test clipboard copy
+          </button>
+        )}
 
         <a
           href={DISCORD_URL}

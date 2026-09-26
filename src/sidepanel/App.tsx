@@ -404,8 +404,7 @@ export default function App() {
             setClipboard(on);
             saveSettings({ clipboard: on }).catch(() => undefined);
             toast.success(on ? "Screenshots will also copy to clipboard" : "Clipboard copy off");
-          }}
-          onSignIn={() => {
+          }}          onSignIn={() => {
             setProfileOpen(false);
             setProOpen("login");
           }}
