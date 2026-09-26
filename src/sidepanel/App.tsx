@@ -141,7 +141,7 @@ export default function App() {
       ];
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-background text-foreground overflow-x-clip">
       <Toaster position="top-center" theme={theme} closeButton toastOptions={{ duration: 3500 }} />
       <header className="sticky top-0 z-10 border-b border-border bg-card/95 backdrop-blur">
         <div className="flex items-center gap-2.5 px-4 py-3">
@@ -254,7 +254,6 @@ export default function App() {
                   <FormatButton
                     active={format === "pdf"}
                     format={"pdf" as Format}
-                    infoTip={{ id: "pdf-tip", label: "About PDF format", text: "PDF saves the full page as a document." }}
                     onClick={() => { setFormat("pdf"); persistConfig(captureType, quality, "pdf"); }}
                   />
                 )}

@@ -257,6 +257,15 @@ let cancelPick: (() => void) | null = null;
 function startPick(mode: "region" | "element") {
   hideFocus();
   setBusy(false); // the selection overlay itself is the indicator from here
+  // Kill any previous in-progress pick first (re-triggered shortcut/pill):
+  // otherwise its document listeners leak and haunt the new pick.
+  const prev = cancelPick;
+  cancelPick = null;
+  try {
+    prev?.();
+  } catch {
+    /* noop */
+  }
   cleanupOverlay();
   const overlay = document.createElement("div");
   overlay.id = "cs-pick-overlay";
@@ -371,6 +380,30 @@ function startElement(overlay: HTMLElement) {
   let current: Element | null = null;
   let done = false;
   const prevOutline = new Map<Element, string>();
+  const prevOffset = new Map<Element, string>();
+  let tag: HTMLElement | null = null;
+
+  const showTag = (e: MouseEvent, el: Element) => {
+    if (!tag) {
+      tag = document.createElement("div");
+      tag.id = "cs-pick-label";
+      tag.style.cssText =
+        "position:fixed;background:#0F172A;color:#fff;font:12px Inter,system-ui,sans-serif;padding:2px 8px;border-radius:6px;z-index:2147483647;pointer-events:none;white-space:nowrap;";
+      document.documentElement.appendChild(tag);
+    }
+    const r = (el as HTMLElement).getBoundingClientRect();
+    const name = el.tagName.toLowerCase();
+    const cls = (el as HTMLElement).id
+      ? `#${(el as HTMLElement).id}`
+      : ((el as HTMLElement).className?.toString?.().split(" ")[0] ?? "");
+    tag.textContent = `${name}${cls ? " " + cls : ""} · ${Math.round(r.width)} × ${Math.round(r.height)}${e.altKey ? " (parent)" : ""}`;
+    tag.style.left = `${Math.min(window.innerWidth - 180, e.clientX + 14)}px`;
+    tag.style.top = `${Math.max(0, e.clientY - 28)}px`;
+  };
+  const hideTag = () => {
+    tag?.remove();
+    tag = null;
+  };
 
   const highlight = (el: Element) => {
     if (current === el) return;
@@ -378,12 +411,14 @@ function startElement(overlay: HTMLElement) {
     current = el;
     const h = el as HTMLElement;
     prevOutline.set(el, h.style.outline);
+    prevOffset.set(el, h.style.outlineOffset);
     h.style.outline = "2px solid #2563EB";
     h.style.outlineOffset = "2px";
   };
   const unhighlight = () => {
     if (!current) return;
     (current as HTMLElement).style.outline = prevOutline.get(current) ?? "";
+    (current as HTMLElement).style.outlineOffset = prevOffset.get(current) ?? "";
     current = null;
   };
   const teardown = () => {
@@ -391,6 +426,7 @@ function startElement(overlay: HTMLElement) {
     document.removeEventListener("mousemove", onMove, true);
     document.removeEventListener("click", onClick, true);
     unhighlight();
+    hideTag();
     cleanupOverlay();
   };
   // Esc removes EVERYTHING: listeners, highlight, overlay, cursor.
@@ -398,20 +434,31 @@ function startElement(overlay: HTMLElement) {
     teardown();
     notifyCancelled();
   };
+  const pickTarget = (e: MouseEvent, el: Element): Element => {
+    // Alt+hover/click climbs to the parent (cards, sections) when hover
+    // lands on a tiny nested child.
+    if (e.altKey && el.parentElement && el.parentElement !== document.body) {
+      return el.parentElement;
+    }
+    return el;
+  };
   const onMove = (e: MouseEvent) => {
     if (done) return;
-    const el = document.elementFromPoint(e.clientX, e.clientY);
-    if (!el || isOurNode(el) || el.id === "cs-pick-overlay") return;
-    if (el === document.documentElement || el === document.body) return;
+    const raw = document.elementFromPoint(e.clientX, e.clientY);
+    if (!raw || isOurNode(raw) || raw.id === "cs-pick-overlay") return;
+    if (raw === document.documentElement || raw === document.body) return;
+    const el = pickTarget(e, raw);
     highlight(el);
+    showTag(e, el);
   };
   const onClick = async (e: MouseEvent) => {
     if (done) return;
-    const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
-    if (!el || isOurNode(el) || el.id === "cs-pick-overlay") return; // ignore clicks on our UI
+    const raw = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+    if (!raw || isOurNode(raw) || raw.id === "cs-pick-overlay") return; // ignore clicks on our UI
     e.preventDefault();
     e.stopPropagation();
-    const target = current && current === el ? current : el;
+    const hovered = current && (current === raw || raw.contains(current)) ? current : raw;
+    const target = pickTarget(e, hovered);
     const r = (target as HTMLElement).getBoundingClientRect();
     teardown();
     const w = Math.min(r.width, window.innerWidth - Math.max(0, r.x));

@@ -85,6 +85,37 @@ export async function clearLocalPro(): Promise<void> {
   }
 }
 
+/**
+ * Trial identity: the logged-in ExtensionPay email, cached locally.
+ * Trials bind to this — clearing browser data alone no longer resets them,
+ * because the same email re-resolves to the same person on next login.
+ * Returns null when never logged in (network failures included).
+ */
+export async function getTrialIdentity(): Promise<string | null> {
+  try {
+    const cached = await chrome.storage.local.get(["trialEmail"]);
+    if (typeof cached.trialEmail === "string" && cached.trialEmail) {
+      return cached.trialEmail;
+    }
+  } catch {
+    /* noop */
+  }
+  try {
+    const user = await fetchProUser();
+    if (user.email) {
+      try {
+        await chrome.storage.local.set({ trialEmail: user.email });
+      } catch {
+        /* noop */
+      }
+      return user.email;
+    }
+  } catch {
+    /* offline / unconfigured */
+  }
+  return null;
+}
+
 export function openPaymentPage(): void {
   if (!EXTPAY_CONFIGURED || !PAYMENTS_LIVE) throw new Error("NOT_LIVE");
   client().openPaymentPage();

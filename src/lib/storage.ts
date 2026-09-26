@@ -116,6 +116,7 @@ export const TRIAL_DAILY_4K = TRIAL_DAILY;
 
 interface TrialState {
   date: string; // local day key
+  email: string; // identity the counters belong to
   used4k: number;
   used8k: number;
 }
@@ -124,44 +125,51 @@ function todayKey(): string {
   return new Date().toDateString();
 }
 
-async function readTrial(): Promise<TrialState> {
+async function readTrial(email: string): Promise<TrialState> {
+  const fresh: TrialState = { date: todayKey(), email, used4k: 0, used8k: 0 };
   try {
     const res = await chrome.storage.local.get(["trial"]);
     const t = (res.trial ?? {}) as Partial<TrialState>;
-    if (t.date === todayKey()) {
-      return { date: t.date, used4k: t.used4k ?? 0, used8k: t.used8k ?? 0 };
+    if (t.date === todayKey() && t.email === email) {
+      return { date: t.date, email: t.email, used4k: t.used4k ?? 0, used8k: t.used8k ?? 0 };
     }
   } catch {
     /* noop */
   }
-  return { date: todayKey(), used4k: 0, used8k: 0 };
+  return fresh;
 }
 
-export async function trialRemaining(q: TrialQuality): Promise<number> {
-  const t = await readTrial();
+async function writeTrial(t: TrialState): Promise<void> {
+  try {
+    await chrome.storage.local.set({ trial: t });
+  } catch {
+    /* noop */
+  }
+}
+
+export async function trialRemaining(q: TrialQuality, email = ""): Promise<number> {
+  const t = await readTrial(email);
   const used = q === "4K" ? t.used4k : t.used8k;
   return Math.max(0, TRIAL_DAILY - used);
 }
 
 /** Returns false when today's trial is exhausted (does not consume). */
-export async function consumeTrial(q: TrialQuality): Promise<boolean> {
-  const t = await readTrial();
+export async function consumeTrial(q: TrialQuality, email = ""): Promise<boolean> {
+  const t = await readTrial(email);
   const used = q === "4K" ? t.used4k : t.used8k;
   if (used >= TRIAL_DAILY) return false;
-  await chrome.storage.local.set({
-    trial: {
-      date: t.date,
-      used4k: q === "4K" ? t.used4k + 1 : t.used4k,
-      used8k: q === "8K" ? t.used8k + 1 : t.used8k,
-    },
+  await writeTrial({
+    ...t,
+    used4k: q === "4K" ? t.used4k + 1 : t.used4k,
+    used8k: q === "8K" ? t.used8k + 1 : t.used8k,
   });
   return true;
 }
 
 export async function trialRemaining4k(): Promise<number> {
-  return trialRemaining("4K");
+  return trialRemaining("4K", "");
 }
 
 export async function consumeTrial4k(): Promise<boolean> {
-  return consumeTrial("4K");
+  return consumeTrial("4K", "");
 }

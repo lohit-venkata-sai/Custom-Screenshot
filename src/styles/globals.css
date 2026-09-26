@@ -57,3 +57,11 @@ body {
   outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
 }
+
+/* Sidebar toasts: close button vertically centered on the right edge. */
+[data-sonner-toaster] {
+  --toast-close-button-transform: translate(35%, -50%);
+}
+[data-sonner-toast][data-styled="true"] [data-close-button] {
+  top: 50%;
+}
