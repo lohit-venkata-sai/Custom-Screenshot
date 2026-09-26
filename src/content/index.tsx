@@ -200,6 +200,23 @@ function setBusy(on: boolean) {
   renderBusy();
 }
 
+// Best-effort clipboard copy (opt-in setting). Runs in page context where
+// clipboard writes are allowed; failures never break the saved download.
+async function maybeClipboard(dataUrl: string, format: Format) {
+  if (format === "pdf") return;
+  try {
+    const s = await chrome.storage.local.get(["settings"]);
+    const on = (s.settings as { clipboard?: boolean } | undefined)?.clipboard === true;
+    if (!on) return;
+    const blob = await (await fetch(dataUrl)).blob();
+    await navigator.clipboard.write([
+      new ClipboardItem({ [blob.type || "image/png"]: blob }),
+    ]);
+  } catch {
+    /* noop */
+  }
+}
+
 async function styledTheme(): Promise<"light" | "dark"> {  try {
     const data = await chrome.storage.local.get(["settings"]);
     const t = (data.settings as { theme?: string } | undefined)?.theme;
@@ -360,6 +377,7 @@ function startRegion(overlay: HTMLElement) {
       const cfg = await readActiveConfig();
       const raw = (await requestBoosted(cfg.quality)) ?? (await requestRaw());
       const cropped = await cropDataUrl(raw, { x, y, width: w, height: h }, cfg.quality, cfg.format);
+      await maybeClipboard(cropped.dataUrl, cfg.format);
       await chrome.runtime.sendMessage({
         type: "CS_FINISH_PICK",
         dataUrl: cropped.dataUrl,
@@ -477,6 +495,7 @@ function startElement(overlay: HTMLElement) {
         cfg.quality,
         cfg.format
       );
+      await maybeClipboard(cropped.dataUrl, cfg.format);
       await chrome.runtime.sendMessage({
         type: "CS_FINISH_PICK",
         dataUrl: cropped.dataUrl,
@@ -784,6 +803,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         hideUI();
         await new Promise((r) => setTimeout(r, 50));
         const out = await processDataUrl(msg.raw, msg.quality as Quality, msg.format as Format);
+        await maybeClipboard(out.dataUrl, msg.format as Format);
         sendResponse(out);
         break;
       }
@@ -819,6 +839,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           msg.targetWidth,
           msg.ys
         );
+        await maybeClipboard(out.dataUrl, msg.format as Format);
         sendResponse(out);
         break;
       }

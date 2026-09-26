@@ -27,6 +27,23 @@ export function ThemeIcon({ theme }: { theme: "light" | "dark" }) {
   return theme === "light" ? <Moon size={18} /> : <Sun size={18} />;
 }
 
+/** Discord invite — TODO(owner): paste the invite URL. */
+export const DISCORD_URL = "#";
+
+export function DiscordIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden
+    >
+      <path d="M20.32 4.37a19.8 19.8 0 0 0-4.93-1.51 13.78 13.78 0 0 0-.64 1.28 18.27 18.27 0 0 0-5.5 0 12.64 12.64 0 0 0-.64-1.28h-.05A19.74 19.74 0 0 0 3.64 4.37 20.15 20.15 0 0 0 .11 18.06a19.9 19.9 0 0 0 6.04 3.03c.46-.63.87-1.3 1.22-2a12.9 12.9 0 0 1-1.93-.92c.16-.12.32-.24.47-.37a14.2 14.2 0 0 0 12.18 0c.15.13.31.25.47.37-.61.36-1.26.68-1.93.92.35.7.76 1.37 1.22 2a19.83 19.83 0 0 0 6.04-3.03 20.02 20.02 0 0 0-3.57-13.69ZM8.02 15.33c-1.18 0-2.16-1.08-2.16-2.42s.95-2.42 2.16-2.42 2.18 1.09 2.16 2.42c0 1.34-.95 2.42-2.16 2.42Zm7.96 0c-1.18 0-2.16-1.08-2.16-2.42s.95-2.42 2.16-2.42 2.18 1.09 2.16 2.42c0 1.34-.95 2.42-2.16 2.42Z" />
+    </svg>
+  );
+}
+
 export function InfoTip({ label, text, id }: { label: string; text: string; id: string }) {
   return (
     <span className="relative inline-flex group">

@@ -72,9 +72,10 @@ export function ProModal({
       const email = await signInWithGoogle();
       onSignedIn(email);
       toast.success(`Signed in as ${email} — trial active`);
+      onClose();
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
-      if (/NO_EMAIL|no token|canceled|denied|OAuth/i.test(m)) {
+      if (/NO_EMAIL|no token|cancelled|canceled|denied|OAuth/i.test(m)) {
         toast.message("Sign-in was cancelled or isn't configured yet");
       } else {
         toast.error("Google sign-in failed — check your connection");

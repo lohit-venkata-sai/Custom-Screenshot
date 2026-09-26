@@ -20,6 +20,7 @@ export interface CaptureConfig {
 
 export interface AppSettings extends CaptureConfig {
   theme: "light" | "dark";
+  clipboard: boolean; // also copy captures to clipboard
 }
 
 export interface RegionRect {

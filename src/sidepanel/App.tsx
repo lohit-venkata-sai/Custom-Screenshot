@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Camera, Bookmark } from "lucide-react";
+import { Camera, Bookmark, User } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { CaptureTab } from "./components/CaptureTab";
 import { PresetsTab, EditPresetDialog } from "./components/PresetsTab";
 import { ProModal, type ProModalMode } from "./components/ProModal";
+import { ProfileDialog } from "./components/ProfileDialog";
 import { Button } from "./components/ui";
-import { BrandIcon, FormatButton, QualityButton, ThemeIcon, InfoTip } from "./components/parts";
+import { BrandIcon, FormatButton, QualityButton, ThemeIcon, InfoTip, DiscordIcon, DISCORD_URL } from "./components/parts";
 import { applyTheme } from "../lib/theme";
 import {
   deletePreset,
@@ -41,6 +42,8 @@ export default function App() {
   const [trialLeft8k, setTrialLeft8k] = useState<number>(2);
   const [pro, setPro] = useState(false);
   const [identity, setIdentity] = useState<string | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [clipboard, setClipboard] = useState(false);
 
   useEffect(() => {
     getStore().then((s) => {
@@ -51,6 +54,7 @@ export default function App() {
       setFormat(s.settings.format);
       setTheme(s.settings.theme);
       applyTheme(s.settings.theme);
+      setClipboard(!!s.settings.clipboard);
     });
     const loadTrials = (email: string | null) => {
       const em = email ?? "";
@@ -164,6 +168,24 @@ export default function App() {
             <div className="font-extrabold text-[17px] tracking-tight">Custom Screenshot</div>
             <div className="text-[12.5px] text-muted-foreground">Capture screenshots your way.</div>
           </div>
+          <a
+            href={DISCORD_URL}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Join our Discord"
+            title="Join our Discord"
+            className="rounded-xl border border-border p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <DiscordIcon size={18} />
+          </a>
+          <button
+            onClick={() => setProfileOpen(true)}
+            aria-label={identity ? `Profile (${identity})` : "Open profile"}
+            title={identity ?? "Profile"}
+            className="flex h-9 w-9 items-center justify-center rounded-xl border border-border text-[14px] font-bold text-white bg-gradient-to-r from-[#2563EB] to-[#3B82F6] hover:brightness-110"
+          >
+            {identity ? identity.charAt(0).toUpperCase() : <User size={17} />}
+          </button>
           <button
             onClick={toggleTheme}
             aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
@@ -189,6 +211,19 @@ export default function App() {
             </button>
           ))}
         </nav>
+        <button
+          onClick={() => (identity ? setProfileOpen(true) : setProOpen("login"))}
+          className="flex w-full items-center justify-center gap-1.5 border-t border-border bg-muted/40 px-4 py-1.5 text-[12px] text-muted-foreground hover:text-foreground"
+          aria-label="Trial status — open profile"
+        >
+          {pro ? (
+            <span>✓ Pro active — unlimited 4K and 8K</span>
+          ) : identity ? (
+            <span>Trial today: 4K {trialLeft}/{TRIAL_DAILY_4K} · 8K {trialLeft8k}/{TRIAL_DAILY_4K} free left</span>
+          ) : (
+            <span>Guest — sign in for the 4K/8K daily trial</span>
+          )}
+        </button>
       </header>
 
       <main className="px-4 py-4 space-y-5 max-w-[480px] mx-auto">
@@ -350,6 +385,32 @@ export default function App() {
             setEditing(null);
             toast.success("Preset updated");
           }}
+        />
+      )}
+
+      {profileOpen && (
+        <ProfileDialog
+          email={identity}
+          pro={pro}
+          trial4k={trialLeft}
+          trial8k={trialLeft8k}
+          clipboard={clipboard}
+          onClipboardChange={(on) => {
+            setClipboard(on);
+            saveSettings({ clipboard: on }).catch(() => undefined);
+            toast.success(on ? "Screenshots will also copy to clipboard" : "Clipboard copy off");
+          }}
+          onSignIn={() => {
+            setProfileOpen(false);
+            setProOpen("login");
+          }}
+          onSignOut={() => {
+            setIdentity(null);
+            setPro(false);
+            setProfileOpen(false);
+            chrome.storage.local.remove(["trialEmail", "proPaid"]).catch(() => undefined);
+          }}
+          onClose={() => setProfileOpen(false)}
         />
       )}
 

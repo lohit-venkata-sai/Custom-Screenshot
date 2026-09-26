@@ -5,6 +5,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   quality: "1080p",
   format: "png",
   theme: "light",
+  clipboard: false,
 };
 
 interface StoreShape {
