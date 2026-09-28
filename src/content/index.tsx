@@ -236,11 +236,36 @@ function notifyCancelled() {
   chrome.runtime.sendMessage({ type: "CS_PICK_CANCELLED" }).catch(() => undefined);
 }
 
+const PICK_CURSOR_ID = "cs-pick-cursor";
+
+// Crosshair for the whole pick session (region drag + element hover): the
+// overlay is pointer-events:none so its own cursor never hit-tests, and
+// body.style.cursor alone loses to per-element cursors (links/buttons set
+// their own). This session stylesheet forces crosshair over every page
+// element; shadow-DOM UI (pill/toast/busy) is unaffected since document
+// styles don't pierce shadow roots.
+function ensurePickCursor() {
+  document.documentElement.classList.add("cs-picking");
+  if (!document.getElementById(PICK_CURSOR_ID)) {
+    const st = document.createElement("style");
+    st.id = PICK_CURSOR_ID;
+    st.textContent =
+      "html.cs-picking,html.cs-picking *,html.cs-picking *::before,html.cs-picking *::after{cursor:crosshair !important;}";
+    document.head.appendChild(st);
+  }
+}
+
+function removePickCursor() {
+  document.getElementById(PICK_CURSOR_ID)?.remove();
+  document.documentElement.classList.remove("cs-picking");
+}
+
 function cleanupOverlay() {
   document.getElementById("cs-pick-overlay")?.remove();
   document.getElementById("cs-pick-box")?.remove();
   document.getElementById("cs-pick-label")?.remove();
   document.body.style.cursor = "";
+  removePickCursor();
   document.removeEventListener("keydown", escHandler, true);
   setFocusSuppressed(false);
   cancelPick = null;
@@ -279,6 +304,7 @@ function startPick(mode: "region" | "element") {
     "position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:2147483646;pointer-events:none;cursor:crosshair;";
   document.documentElement.appendChild(overlay);
   document.body.style.cursor = "crosshair";
+  ensurePickCursor();
   setFocusSuppressed(true);
   document.addEventListener("keydown", escHandler, true);
 
@@ -290,6 +316,7 @@ function finishPickOverlay(overlay: HTMLElement) {
   overlay.remove();
   document.removeEventListener("keydown", escHandler, true);
   document.body.style.cursor = "";
+  removePickCursor();
 }
 
 function startRegion(overlay: HTMLElement) {
@@ -308,7 +335,7 @@ function startRegion(overlay: HTMLElement) {
     startY = e.clientY;
     box = document.createElement("div");
     box.style.cssText =
-      "position:fixed;border:2px solid #2563EB;background:rgba(37,99,235,.15);z-index:2147483647;pointer-events:none;";
+      "position:fixed;border:2px solid #2563EB;background:rgba(37,99,235,.15);z-index:2147483647;pointer-events:none;cursor:crosshair;";
     label = document.createElement("div");
     label.style.cssText =
       "position:fixed;background:#0F172A;color:#fff;font:12px Inter,system-ui,sans-serif;padding:2px 8px;border-radius:6px;z-index:2147483647;pointer-events:none;";
