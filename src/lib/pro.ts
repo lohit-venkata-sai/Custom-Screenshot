@@ -6,6 +6,15 @@
  * Google OAuth web-flow sign-in binds the 4K/8K daily trial to an identity
  * (`trialEmail`); `isPro()` reads the LOCAL `proPaid` cache first, then the
  * Worker license (network failure fails closed to cache, never throws).
+ *
+ * Privacy: the Worker's trial endpoints store the buyer's email + per-day
+ * 4K/8K shot counts server-side (KV `trial:<email>:<YYYY-MM-DD>`); the owner
+ * updates the store privacy policy separately.
+ *
+ * Request budget (free-tier aware): each premium (4K/8K) capture costs at
+ * most 2 Worker requests — 1× GET /api/trial (pre-capture gate) + 1× POST
+ * /api/consume (after a SUCCESSFUL capture only). Free qualities
+ * (720p/1080p/2K) make zero trial calls; trials never poll.
  */
 
 // Kill-switch: false = coming-soon toast, NO network (Worker calls skipped
@@ -174,6 +183,76 @@ export async function fetchLicense(email: string): Promise<LicenseStatus> {
     return { pro: data.pro === true, plan: typeof data.plan === "string" ? data.plan : null };
   } catch {
     return none;
+  }
+}
+
+// ---------- Server-side trial metering (Worker is authority when reachable) ----------
+
+export interface TrialStatus {
+  remaining4k: number;
+  remaining8k: number;
+  daily: number;
+}
+
+export type ServerTrialQuality = "4K" | "8K";
+
+/** GET /api/trial — null when Worker unconfigured/unreachable (caller falls
+ * back to local counters, fail-open UX). Never throws. */
+export async function fetchTrial(email: string): Promise<TrialStatus | null> {
+  if (!email || !isWorkerConfigured()) return null;
+  try {
+    const res = await fetchWithTimeout(
+      `${WORKER_URL}/api/trial?email=${encodeURIComponent(email)}`,
+      {},
+      8000
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as Partial<TrialStatus>;
+    if (!Number.isFinite(data.remaining4k) || !Number.isFinite(data.remaining8k)) return null;
+    return {
+      remaining4k: Math.max(0, Math.floor(data.remaining4k as number)),
+      remaining8k: Math.max(0, Math.floor(data.remaining8k as number)),
+      daily: Number.isFinite(data.daily) ? (data.daily as number) : 2,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Server remaining for one quality — null when offline/unconfigured. Never throws. */
+export async function serverTrialRemaining(
+  q: ServerTrialQuality,
+  email: string
+): Promise<number | null> {
+  const t = await fetchTrial(email);
+  if (!t) return null;
+  return q === "4K" ? t.remaining4k : t.remaining8k;
+}
+
+/** POST /api/consume — remaining after the charge, or null when
+ * offline/unconfigured (caller keeps the local consume as the record).
+ * Never throws; an exhausted server (ok:false, remaining 0) returns 0. */
+export async function consumeServerTrial(
+  email: string,
+  quality: ServerTrialQuality
+): Promise<number | null> {
+  if (!email || !isWorkerConfigured()) return null;
+  try {
+    const res = await fetchWithTimeout(
+      `${WORKER_URL}/api/consume`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, quality }),
+      },
+      8000
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as { remaining?: unknown };
+    if (!Number.isFinite(data.remaining)) return null;
+    return Math.max(0, Math.floor(data.remaining as number));
+  } catch {
+    return null;
   }
 }
 

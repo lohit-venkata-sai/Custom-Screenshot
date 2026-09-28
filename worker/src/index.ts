@@ -106,6 +106,86 @@ function licenseKey(email: string): string {
   return `license:${email.trim().toLowerCase()}`;
 }
 
+// ---------------------------------------------------------------------------
+// Server-side trial metering (same LICENSES KV namespace, no secrets).
+// Privacy: KV stores the buyer's email + per-day 4K/8K shot counts under
+// `trial:<lowercased-email>:<YYYY-MM-DD>` (UTC day) → {used4k, used8k}.
+// Request budget (free-tier aware): each premium (4K/8K) capture costs at
+// most 2 Worker requests — 1× GET /api/trial (pre-capture gate) + 1× POST
+// /api/consume (after a SUCCESSFUL capture only). No polling for trials;
+// the existing bounded license-poll runs only for purchases.
+// ---------------------------------------------------------------------------
+const TRIAL_DAILY = 2;
+type TrialQuality = "4K" | "8K";
+
+function trialKey(email: string, day: string): string {
+  return `trial:${email.trim().toLowerCase()}:${day}`;
+}
+
+function trialDay(d: Date = new Date()): string {
+  return d.toISOString().slice(0, 10); // UTC YYYY-MM-DD
+}
+
+async function readTrialUses(env: Env, email: string, day: string): Promise<{ used4k: number; used8k: number }> {
+  const raw = await env.LICENSES.get(trialKey(email, day));
+  if (!raw) return { used4k: 0, used8k: 0 };
+  try {
+    const v = JSON.parse(raw) as { used4k?: unknown; used8k?: unknown };
+    const used4k = Number.isFinite(v.used4k) ? Math.max(0, Math.min(TRIAL_DAILY, Math.floor(v.used4k as number))) : 0;
+    const used8k = Number.isFinite(v.used8k) ? Math.max(0, Math.min(TRIAL_DAILY, Math.floor(v.used8k as number))) : 0;
+    return { used4k, used8k };
+  } catch {
+    return { used4k: 0, used8k: 0 };
+  }
+}
+
+async function handleTrial(req: Request, env: Env): Promise<Response> {
+  const email = (new URL(req.url).searchParams.get("email") ?? "").trim();
+  if (!EMAIL_RE.test(email)) return json({ error: "invalid_email" }, 400, req, env);
+  const uses = await readTrialUses(env, email, trialDay());
+  return json(
+    {
+      remaining4k: Math.max(0, TRIAL_DAILY - uses.used4k),
+      remaining8k: Math.max(0, TRIAL_DAILY - uses.used8k),
+      daily: TRIAL_DAILY,
+    },
+    200,
+    req,
+    env
+  );
+}
+
+async function handleConsume(req: Request, env: Env): Promise<Response> {
+  let body: { email?: unknown; quality?: unknown };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return json({ error: "bad_json" }, 400, req, env);
+  }
+  const email = typeof body.email === "string" ? body.email.trim() : "";
+  const quality = typeof body.quality === "string" ? body.quality : "";
+  if (!EMAIL_RE.test(email)) return json({ error: "invalid_email" }, 400, req, env);
+  if (quality !== "4K" && quality !== "8K") {
+    return json({ error: "invalid_quality" }, 400, req, env);
+  }
+  const q = quality as TrialQuality;
+  const day = trialDay();
+  const uses = await readTrialUses(env, email, day);
+  const used = q === "4K" ? uses.used4k : uses.used8k;
+  // Clamp: never exceed the daily cap. Already-exhausted consumes are
+  // idempotent (no increment) and report remaining 0 with ok:false.
+  if (used >= TRIAL_DAILY) {
+    return json({ ok: false, remaining: 0 }, 200, req, env);
+  }
+  const next = {
+    used4k: q === "4K" ? uses.used4k + 1 : uses.used4k,
+    used8k: q === "8K" ? uses.used8k + 1 : uses.used8k,
+  };
+  await env.LICENSES.put(trialKey(email, day), JSON.stringify(next));
+  const remaining = TRIAL_DAILY - (q === "4K" ? next.used4k : next.used8k);
+  return json({ ok: true, remaining }, 200, req, env);
+}
+
 async function verifyWebhookSignature(
   rawBody: string,
   signature: string,
@@ -266,6 +346,12 @@ export default {
     }
     if (url.pathname === "/api/license" && req.method === "GET") {
       return handleLicense(req, env);
+    }
+    if (url.pathname === "/api/trial" && req.method === "GET") {
+      return handleTrial(req, env);
+    }
+    if (url.pathname === "/api/consume" && req.method === "POST") {
+      return handleConsume(req, env);
     }
     return new Response("not found", { status: 404 });
   },
