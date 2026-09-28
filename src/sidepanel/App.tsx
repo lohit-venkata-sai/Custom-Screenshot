@@ -69,6 +69,17 @@ export default function App() {
     };
     loadTrials(null);
     isPro().then(setPro).catch(() => undefined);
+    // Pro can flip while the panel is open (unlock/refresh elsewhere):
+    // follow the same `proPaid` cache the toolbar icon watches — no reload needed.
+    const onProChanged = (
+      changes: { [key: string]: chrome.storage.StorageChange },
+      areaName: string
+    ) => {
+      if (areaName === "local" && "proPaid" in changes) {
+        isPro().then(setPro).catch(() => undefined);
+      }
+    };
+    chrome.storage.onChanged.addListener(onProChanged);
     getTrialIdentity()
       .then((email) => {
         setIdentity(email);
@@ -85,6 +96,7 @@ export default function App() {
         }
       })
       .catch(() => undefined);
+    return () => chrome.storage.onChanged.removeListener(onProChanged);
   }, []);
 
   const persistConfig = useCallback(
@@ -169,7 +181,7 @@ export default function App() {
       <Toaster position="top-center" theme={theme} closeButton toastOptions={{ duration: 3500 }} />
       <header className="sticky top-0 z-10 border-b border-border bg-card/95 backdrop-blur">
         <div className="flex items-center gap-2.5 px-4 py-3">
-          <BrandIcon />
+          <BrandIcon pro={pro} />
           <div className="flex-1 leading-tight">
             <div className="font-extrabold text-[17px] tracking-tight">Custom Screenshot</div>
             <div className="text-[12.5px] text-muted-foreground">Capture screenshots your way.</div>
@@ -451,6 +463,7 @@ export default function App() {
             setTrialLeft8k(TRIAL_DAILY_8K);
             setProfileOpen(false);
             chrome.storage.local.remove(["trialEmail", "proPaid"]).catch(() => undefined);
+            chrome.runtime.sendMessage({ type: "CS_PRO_CHANGED" }).catch(() => undefined);
           }}
           onClose={() => setProfileOpen(false)}
         />
@@ -469,6 +482,8 @@ export default function App() {
           }}
           onUnlocked={() => {
             setPro(true);
+            // Wake the service worker so the toolbar icon re-syncs at once.
+            chrome.runtime.sendMessage({ type: "CS_PRO_CHANGED" }).catch(() => undefined);
             const em = identity ?? "";
             trialRemaining("4K", em).then(setTrialLeft).catch(() => undefined);
             trialRemaining("8K", em).then(setTrialLeft8k).catch(() => undefined);
