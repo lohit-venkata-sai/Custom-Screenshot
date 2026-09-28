@@ -794,6 +794,68 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
               new ClipboardItem({ [blob.type || "image/png"]: blob }),
             ]);
           } catch (e) {
+            // Middle step: some paste targets only accept image/png, so a
+            // JPG/WebP ClipboardItem write can fail where PNG would succeed.
+            if (blob.type && blob.type !== "image/png") {
+              {
+                let bitmap: ImageBitmap | null = null;
+                let url: string | null = null;
+                try {
+                  if (typeof createImageBitmap === "function") {
+                    try {
+                      bitmap = await createImageBitmap(blob);
+                    } catch {
+                      bitmap = null;
+                    }
+                  }
+                  let w = 0;
+                  let h = 0;
+                  let img: HTMLImageElement | null = null;
+                  if (bitmap) {
+                    w = bitmap.width;
+                    h = bitmap.height;
+                  } else {
+                    url = URL.createObjectURL(blob);
+                    img = await new Promise<HTMLImageElement>((resolve, reject) => {
+                      const im = new Image();
+                      im.onload = () => resolve(im);
+                      im.onerror = () => reject(new Error("decode failed"));
+                      im.src = url as string;
+                    });
+                    w = img.naturalWidth || img.width;
+                    h = img.naturalHeight || img.height;
+                  }
+                  if (!w || !h) throw new Error("decode failed");
+                  const canvas = document.createElement("canvas");
+                  canvas.width = w;
+                  canvas.height = h;
+                  const ctx = canvas.getContext("2d");
+                  if (!ctx) throw new Error("decode failed");
+                  if (bitmap) ctx.drawImage(bitmap, 0, 0);
+                  else ctx.drawImage(img as HTMLImageElement, 0, 0, w, h);
+                  const png: Blob = await new Promise((resolve, reject) => {
+                    canvas.toBlob(
+                      (b) => (b ? resolve(b) : reject(new Error("encode failed"))),
+                      "image/png"
+                    );
+                  });
+                  await navigator.clipboard.write([
+                    new ClipboardItem({ "image/png": png }),
+                  ]);
+                  flavor = "png";
+                } catch {
+                  // Fall through to the execCommand fallback below.
+                } finally {
+                  if (url) URL.revokeObjectURL(url);
+                  if (bitmap && typeof bitmap.close === "function") bitmap.close();
+                }
+                if (flavor === "png") {
+                  sendResponse({ ok: true, flavor });
+                  break;
+                }
+              }
+            }
+            // Last-resort focus-free img+execCommand trick.
             flavor = "html";
             const reader: string = await new Promise((resolve, reject) => {
               const fr = new FileReader();
