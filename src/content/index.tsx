@@ -362,7 +362,8 @@ function startRegion(overlay: HTMLElement) {
       // let the browser repaint without our overlay before capturing
       await new Promise((r) => setTimeout(r, 120));
       const cfg = await readActiveConfig();
-      const raw = (await requestBoosted(cfg.quality, { x, y, width: w, height: h })) ?? (await requestRaw());
+      const boosted = await requestBoosted(cfg.quality, { x, y, width: w, height: h });
+      const raw = boosted.raw ?? (await requestRaw());
       const cropped = await cropDataUrl(raw, { x, y, width: w, height: h }, cfg.quality, cfg.format);
       await chrome.runtime.sendMessage({
         type: "CS_FINISH_PICK",
@@ -371,6 +372,7 @@ function startRegion(overlay: HTMLElement) {
         height: cropped.height,
         format: cfg.format,
       });
+      if (!boosted.raw) boostFallbackToast(boosted.failReason, cfg.quality);
     } catch (err) {
       toast("Capture failed", err instanceof Error ? err.message : String(err), true);
     }
@@ -474,13 +476,13 @@ function startElement(overlay: HTMLElement) {
     try {
       await new Promise((res) => setTimeout(res, 120));
       const cfg = await readActiveConfig();
-      const raw =
-        (await requestBoosted(cfg.quality, {
-          x: Math.max(0, r.x),
-          y: Math.max(0, r.y),
-          width: w,
-          height: h,
-        })) ?? (await requestRaw());
+      const boosted = await requestBoosted(cfg.quality, {
+        x: Math.max(0, r.x),
+        y: Math.max(0, r.y),
+        width: w,
+        height: h,
+      });
+      const raw = boosted.raw ?? (await requestRaw());
       const cropped = await cropDataUrl(
         raw,
         { x: Math.max(0, r.x), y: Math.max(0, r.y), width: w, height: h },
@@ -494,6 +496,7 @@ function startElement(overlay: HTMLElement) {
         height: cropped.height,
         format: cfg.format,
       });
+      if (!boosted.raw) boostFallbackToast(boosted.failReason, cfg.quality);
     } catch (err) {
       toast("Capture failed", err instanceof Error ? err.message : String(err), true);
     }
@@ -537,24 +540,49 @@ function requestRaw(): Promise<string> {
   });
 }
 
-/** Density-boosted viewport shot for crops; null when pointless or blocked.
- * With rect (CSS px, known at capture time) the background fits THAT RECT
- * into an 8K frame; without it, viewport-based boost. Crop math is unchanged:
- * cropDataUrl derives scale from the actual bitmap, so rect×dsf falls out. */
+/** Boosted shot with fallback detail: raw set on success; failReason set
+ * ONLY when boost was wanted but blocked (caller classifies it for the
+ * warning toast). Null failReason = boost pointless ("screen suffices" /
+ * "no geometry") or messaging failure — caller stays silent. */
 function requestBoosted(
   quality: Quality,
   rect?: { x: number; y: number; width: number; height: number }
-): Promise<string | null> {
+): Promise<{ raw: string | null; failReason: string | null }> {
   return new Promise((resolve) => {
     try {
       chrome.runtime.sendMessage({ type: "CS_CAPTURE_BOOSTED_VISIBLE", quality, rect }, (res) => {
-        if (chrome.runtime.lastError || !res?.ok) resolve(null);
-        else resolve(res.raw as string);
+        if (chrome.runtime.lastError) {
+          resolve({ raw: null, failReason: null });
+          return;
+        }
+        if (res?.ok) {
+          resolve({ raw: res.raw as string, failReason: null });
+          return;
+        }
+        const err = String(res?.error ?? "");
+        if (/screen suffices|no geometry/i.test(err)) resolve({ raw: null, failReason: null });
+        else resolve({ raw: null, failReason: err || "boost failed" });
       });
     } catch {
-      resolve(null);
+      resolve({ raw: null, failReason: null });
     }
   });
+}
+
+/** One-shot fallback warning: 4K/8K only, only when boost was wanted but
+ * blocked, once per capture (callers invoke after CS_FINISH_PICK resolves,
+ * so it stacks below the success toast and never spams). */
+function boostFallbackToast(failReason: string | null, quality: Quality) {
+  if (quality !== "4K" && quality !== "8K") return;
+  if (failReason == null) return;
+  const devtools = /another debugger|already attached|DBG_ATTACHED_ELSEWHERE/i.test(failReason);
+  void toast(
+    "High-res boost unavailable",
+    devtools
+      ? "High-res render blocked (DevTools open?) — standard capture used, quality reduced"
+      : "High-res render unavailable — standard capture used, quality reduced",
+    true
+  );
 }
 
 // ---------- full page helpers ----------

@@ -253,10 +253,12 @@ async function captureVisiblePreset(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
   if (tab.id == null) throw new Error("No active tab");
   await ensureContent(tab.id, tab.url ?? "");
   // Augustat path: re-render the same viewport at higher density when the
-  // screen alone can't reach the requested quality. Falls back silently.
+  // screen alone can't reach the requested quality. Falls back to raw,
+  // warning once when a 4K/8K boost was wanted but blocked (Part 2).
   const geom = await pageGeom(tab.id);
   const targetH = QUALITY_HEIGHT[cfg.quality];
   const boost = geom ? boostFor(geom.viewportH, geom.dpr || 1, targetH) : 1;
+  let boostErr: unknown = null;
   if (geom && boost > 1) {
     try {
       const res = await withOverlayHidden(tab.id, async () => {
@@ -275,8 +277,8 @@ async function captureVisiblePreset(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
       });
       await downloadDataUrl(res.dataUrl, cfg.format, "", tab.id);
       return res;
-    } catch {
-      /* fall through to classic path */
+    } catch (e) {
+      boostErr = e; // fall through to classic path, warn below
     }
   }
   const res = await withOverlayHidden(tab.id, async () => {
@@ -289,6 +291,9 @@ async function captureVisiblePreset(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
     });
   });
   await downloadDataUrl(res.dataUrl, cfg.format, "", tab.id);
+  if (boostErr && !isNoBenefit(boostErr) && (cfg.quality === "4K" || cfg.quality === "8K")) {
+    await feedback(tab.id, "High-res boost unavailable", boostFallbackBody(boostErr), true);
+  }
   return res;
 }
 
@@ -634,6 +639,24 @@ function fitDsfForRect(rectW: number, rectH: number, cssW: number, cssH: number)
   const vh = Math.max(1, Math.round(cssH));
   const budget = Math.sqrt(MAX_BOOSTED_PX / (vw * vh));
   return Math.min(fit, DSF_CAP, 16000 / vw, 16000 / vh, budget);
+}
+
+// Fallback transparency: a failed boost that WOULD have helped (4K/8K,
+// boost/DSF > 1) must say quality is reduced. DevTools holding the debugger
+// port is the common detectable cause — match its attach errors; never
+// over-claim ("DevTools open?)" hedging or the generic wording otherwise.
+function isDevtoolsBlock(e: unknown): boolean {
+  const m = e instanceof Error ? e.message : String(e ?? "");
+  return /another debugger|already attached|DBG_ATTACHED_ELSEWHERE/i.test(m);
+}
+function isNoBenefit(e: unknown): boolean {
+  const m = e instanceof Error ? e.message : String(e ?? "");
+  return /screen suffices|no geometry/i.test(m);
+}
+function boostFallbackBody(e: unknown): string {
+  return isDevtoolsBlock(e)
+    ? "High-res render blocked (DevTools open?) — standard capture used, quality reduced"
+    : "High-res render unavailable — standard capture used, quality reduced";
 }
 
 async function emuCaptureViewport(
