@@ -1,4 +1,4 @@
-import { Monitor, FileText, Crop, MousePointerClick, Sun, Moon, Info, Lock } from "lucide-react";
+import { Monitor, FileText, Crop, MousePointerClick, Sun, Moon, Info, Lock, Crown } from "lucide-react";
 import logoUrl from "../../assets/custom-screenshot-logo.png";
 import { cn } from "../../lib/utils";
 import type { CaptureType, Format, Preset, Quality } from "../../types";
@@ -81,22 +81,27 @@ export function QualityButton({
   quality,
   sub,
   locked,
+  trialLeft,
   onClick,
 }: {
   active: boolean;
   quality: Quality;
   sub: string;
   locked?: boolean;
+  /** Remaining free trial shots today (4K/8K only — omit for free qualities). */
+  trialLeft?: number;
   onClick: () => void;
 }) {
   const isPremium = quality === "4K" || quality === "8K";
+  const showTrialBadge = isPremium && trialLeft !== undefined;
+  const exhausted = showTrialBadge && (trialLeft as number) <= 0;
   return (
     <button
       onClick={onClick}
       aria-pressed={active}
       aria-disabled={locked}
       className={cn(
-        "relative flex-1 rounded-xl border px-2 py-2.5 text-center transition-colors",
+        "relative flex-1 overflow-hidden rounded-xl border px-2 py-2.5 text-center transition-colors",
         active
           ? "bg-[#2563EB] text-white dark:bg-[#3B82F6]"
           : "bg-card border-border text-foreground hover:bg-muted",
@@ -106,6 +111,21 @@ export function QualityButton({
     >
       {locked && (
         <Lock size={11} className="absolute top-1.5 right-1.5 text-[#D4AF37]" aria-hidden />
+      )}
+      {showTrialBadge && (
+        <span
+          className="pointer-events-none absolute left-0 top-0 h-[30px] w-[30px] overflow-hidden"
+          aria-hidden="true"
+        >
+          <span className="absolute left-[-12px] top-[5px] flex w-[42px] -rotate-45 items-center justify-center bg-[#D4AF37] text-[10px] font-bold leading-[14px] text-white">
+            {exhausted ? <Crown size={10} strokeWidth={3} aria-hidden /> : trialLeft}
+          </span>
+        </span>
+      )}
+      {showTrialBadge && (
+        <span className="sr-only">
+          {exhausted ? "Trial exhausted — go Pro" : `${trialLeft} free trial shots left today`}
+        </span>
       )}
       <div className="text-sm font-semibold">{quality}</div>
       <div className={cn("text-xs", active ? "text-white/80" : "text-muted-foreground")}>{sub}</div>

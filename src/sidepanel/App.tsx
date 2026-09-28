@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Camera, Bookmark, User } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { CaptureTab } from "./components/CaptureTab";
+import { CaptureLogs } from "./components/CaptureLogs";
 import { PresetsTab, EditPresetDialog } from "./components/PresetsTab";
 import { ProModal, type ProModalMode } from "./components/ProModal";
 import { ProfileDialog } from "./components/ProfileDialog";
@@ -16,9 +17,11 @@ import {
   setActivePreset,
   trialRemaining,
   TRIAL_DAILY_4K,
+  TRIAL_DAILY_8K,
+  TESTING_UNLIMITED_TRIALS,
   updatePreset,
 } from "../lib/storage";
-import { isPro, fetchProUser } from "../lib/pro";
+import { isPro, getTrialIdentity } from "../lib/pro";
 import { uid } from "../lib/utils";
 import { APP_VERSION } from "../lib/version";
 import type { CaptureType, Format, Preset, Quality } from "../types";
@@ -30,7 +33,7 @@ const QUALITIES: Quality[] = ["720p", "1080p", "2K", "4K", "8K"];
 export default function App() {
   const [tab, setTab] = useState<"capture" | "presets">("capture");
   const [captureType, setCaptureType] = useState<CaptureType>("visible");
-  const [quality, setQuality] = useState<Quality>("1080p");
+  const [quality, setQuality] = useState<Quality>("2K");
   const [format, setFormat] = useState<Format>("png");
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [presets, setPresets] = useState<Preset[]>([]);
@@ -55,11 +58,9 @@ export default function App() {
       setFormat(s.settings.format);
       setTheme(s.settings.theme);
       applyTheme(s.settings.theme);
-      // Clipboard is parked for rework: force off (stale enabled flags).
-      setClipboard(false);
-      if (s.settings.clipboard) {
-        saveSettings({ clipboard: false }).catch(() => undefined);
-      }
+      // Clipboard defaults OFF (storage.ts) so existing users are unaffected;
+      // respect whatever the user last chose.
+      setClipboard(s.settings.clipboard === true);
     });
     const loadTrials = (email: string | null) => {
       const em = email ?? "";
@@ -68,11 +69,10 @@ export default function App() {
     };
     loadTrials(null);
     isPro().then(setPro).catch(() => undefined);
-    fetchProUser()
-      .then((u) => {
-        setIdentity(u.email);
-        if (u.paid) setPro(true);
-        if (u.email) loadTrials(u.email);
+    getTrialIdentity()
+      .then((email) => {
+        setIdentity(email);
+        if (email) loadTrials(email);
       })
       .catch(() => undefined);
     // Reopened after a gated 4K/8K attempt: go straight to sign-in or upsell.
@@ -135,7 +135,7 @@ export default function App() {
 
   const fireCapture = async (config: { captureType: CaptureType; quality: Quality; format: Format }) => {
     if (busy) return;
-    if (!pro && (config.quality === "4K" || config.quality === "8K")) {
+    if (!TESTING_UNLIMITED_TRIALS && !pro && (config.quality === "4K" || config.quality === "8K")) {
       if (!identity) {
         setProOpen("login");
         return;
@@ -156,7 +156,8 @@ export default function App() {
 
   const activePreset = presets.find((p) => p.id === activeId) ?? null;
   // Trial qualities lock with a gold badge once today's free shots run out.
-  const lockedQualities: Quality[] = pro
+  // TEST MODE bypass: never lock while TESTING_UNLIMITED_TRIALS is on.
+  const lockedQualities: Quality[] = pro || TESTING_UNLIMITED_TRIALS
     ? []
     : [
         ...(trialLeft <= 0 ? ["4K" as Quality] : []),
@@ -223,8 +224,15 @@ export default function App() {
         >
           {pro ? (
             <span>✓ Pro active — unlimited 4K and 8K</span>
+          ) : TESTING_UNLIMITED_TRIALS ? (
+            <span>
+              <span className="mr-1.5 rounded border border-amber-500/60 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-extrabold tracking-wide text-amber-600 dark:text-amber-400">
+                TEST MODE
+              </span>
+              Trial today: 4K {trialLeft}/{TRIAL_DAILY_4K} · 8K {trialLeft8k}/{TRIAL_DAILY_8K} free left
+            </span>
           ) : identity ? (
-            <span>Trial today: 4K {trialLeft}/{TRIAL_DAILY_4K} · 8K {trialLeft8k}/{TRIAL_DAILY_4K} free left</span>
+            <span>Trial today: 4K {trialLeft}/{TRIAL_DAILY_4K} · 8K {trialLeft8k}/{TRIAL_DAILY_8K} free left</span>
           ) : (
             <span>Guest — sign in for the 4K/8K daily trial</span>
           )}
@@ -262,12 +270,27 @@ export default function App() {
                     quality={q}
                     sub={QUALITY_DIMS[q]}
                     locked={lockedQualities.includes(q)}
+                    trialLeft={
+                      q === "4K"
+                        ? pro
+                          ? undefined
+                          : identity
+                            ? trialLeft
+                            : TRIAL_DAILY_4K
+                        : q === "8K"
+                          ? pro
+                            ? undefined
+                            : identity
+                              ? trialLeft8k
+                              : TRIAL_DAILY_8K
+                          : undefined
+                    }
                     onClick={() => {
                       if (lockedQualities.includes(q)) {
                         setProOpen(identity ? "upsell" : "login");
                         return;
                       }
-                      if (!pro && (q === "4K" || q === "8K")) {
+                      if (!pro && !TESTING_UNLIMITED_TRIALS && (q === "4K" || q === "8K")) {
                         if (!identity) {
                           setProOpen("login");
                           return;
@@ -290,9 +313,9 @@ export default function App() {
                   />
                 ))}
               </div>
-              {!pro && (trialLeft < TRIAL_DAILY_4K || trialLeft8k < TRIAL_DAILY_4K) && (
+              {!pro && (trialLeft < TRIAL_DAILY_4K || trialLeft8k < TRIAL_DAILY_8K) && (
                 <p className="mt-1.5 text-[12px] text-muted-foreground">
-                  Trial today: 4K {trialLeft}/{TRIAL_DAILY_4K} · 8K {trialLeft8k}/{TRIAL_DAILY_4K} free left.
+                  Trial today: 4K {trialLeft}/{TRIAL_DAILY_4K} · 8K {trialLeft8k}/{TRIAL_DAILY_8K} free left.
                 </p>
               )}
               {pro && (
@@ -380,6 +403,14 @@ export default function App() {
         )}
       </main>
 
+      {/* Test-mode only: collapsible diagnostics log pinned at the bottom.
+          Hidden entirely (not just collapsed) in store builds. */}
+      {TESTING_UNLIMITED_TRIALS && (
+        <div className="px-4 pb-2 max-w-[480px] mx-auto">
+          <CaptureLogs />
+        </div>
+      )}
+
       <footer className="pb-3 text-center text-[11px] text-muted-foreground">
         Custom Screenshot v{APP_VERSION}
       </footer>
@@ -415,6 +446,9 @@ export default function App() {
           onSignOut={() => {
             setIdentity(null);
             setPro(false);
+            // Signed out = no tracked usage: badges fall back to the full daily count.
+            setTrialLeft(TRIAL_DAILY_4K);
+            setTrialLeft8k(TRIAL_DAILY_8K);
             setProfileOpen(false);
             chrome.storage.local.remove(["trialEmail", "proPaid"]).catch(() => undefined);
           }}

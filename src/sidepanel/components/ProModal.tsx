@@ -4,11 +4,8 @@ import { toast } from "sonner";
 import { Button } from "./ui";
 import { TRIAL_DAILY_4K } from "../../lib/storage";
 import {
-  EXTPAY_CONFIGURED,
-  fetchProUser,
-  openLoginPage,
-  openPaymentPage,
-  refreshProCache,
+  isPro,
+  getTrialIdentity,
   signInWithGoogle,
 } from "../../lib/pro";
 
@@ -19,8 +16,8 @@ export type ProModalMode = "login" | "upsell";
 /**
  * Two modes:
  * - login: trial-gated quality tapped while signed out. Sign-in binds the
- *   free trial to the user (magic link, free) so cache clears can't mint trials.
- * - upsell: trial exhausted. Payment is wired but dormant until plans go live.
+ *   free trial to the user (Google, free) so cache clears can't mint trials.
+ * - upsell: trial exhausted. Checkout is coming soon (Razorpay milestone).
  */
 export function ProModal({
   mode,
@@ -43,11 +40,15 @@ export function ProModal({
   const check = async () => {
     setStatus("checking");
     try {
-      const user = await fetchProUser();
-      setEmail(user.email);
-      setStatus(user.paid ? "paid" : "unpaid");
-      if (user.email) onSignedIn(user.email);
-      if (user.paid) onUnlocked();
+      const [paid, identity] = await Promise.all([isPro(), getTrialIdentity()]);
+      setEmail(identity);
+      if (identity) onSignedIn(identity);
+      if (paid) {
+        setStatus("paid");
+        onUnlocked();
+      } else {
+        setStatus("unpaid");
+      }
     } catch {
       setStatus("unpaid");
     }
@@ -76,20 +77,21 @@ export function ProModal({
 
   const refreshIdentity = async () => {
     try {
-      const user = await fetchProUser();
-      if (user.email) {
-        setEmail(user.email);
-        onSignedIn(user.email);
-        if (user.paid) {
+      const identity = await getTrialIdentity();
+      if (identity) {
+        setEmail(identity);
+        onSignedIn(identity);
+        const paid = await isPro();
+        if (paid) {
           onUnlocked();
           onClose();
           toast.success("Pro unlocked — enjoy unlimited 4K and 8K");
         } else {
           setStatus("unpaid");
-          toast.success(`Signed in as ${user.email} — trial active`);
+          toast.success(`Signed in as ${identity} — trial active`);
         }
       } else {
-        toast.message("Not signed in yet — check your email link first");
+        toast.message("Not signed in yet — use Continue with Google first");
       }
     } catch {
       toast.error("Sign-in check failed — check your connection");
@@ -97,29 +99,13 @@ export function ProModal({
   };
 
   const pay = () => {
-    if (!EXTPAY_CONFIGURED) {
-      toast.message("Checkout is coming soon");
-      return;
-    }
-    try {
-      openPaymentPage();
-      toast.message("Complete payment in the opened tab, then hit Refresh below");
-    } catch {
-      toast.error("Could not open checkout");
-    }
-  };
-
-  const login = () => {
-    try {
-      openLoginPage();
-    } catch {
-      toast.error("Could not open login");
-    }
+    // Payments stack removed (Razorpay planned later): checkout stays dormant.
+    toast.message("Checkout is coming soon");
   };
 
   const refresh = async () => {
     try {
-      const paid = await refreshProCache();
+      const paid = await isPro();
       if (paid) {
         toast.success("Pro unlocked — enjoy unlimited 4K and 8K");
         onUnlocked();
@@ -202,15 +188,9 @@ export function ProModal({
               onClick={pay}
               disabled={status === "checking"}
             >
-              {status === "checking" ? "Checking…" : "Get Pro — Continue with Google"}
+              {status === "checking" ? "Checking…" : "Get Pro — Coming soon"}
             </Button>
-            <div className="mt-2 flex items-center justify-between">
-              <button
-                onClick={login}
-                className="rounded-lg px-2 py-1.5 text-[13px] text-muted-foreground hover:text-foreground"
-              >
-                Already paid? Log in
-              </button>
+            <div className="mt-2 flex items-center justify-center">
               <button
                 onClick={refresh}
                 className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] text-muted-foreground hover:text-foreground"
