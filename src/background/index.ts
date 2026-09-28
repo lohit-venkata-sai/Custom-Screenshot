@@ -1,7 +1,7 @@
 import type { CaptureConfig } from "../types";
 import { QUALITY_HEIGHT, QUALITY_WIDTH } from "../types";
 import { getActivePreset, getSettings } from "../lib/storage";
-import { trialRemaining, consumeTrial } from "../lib/storage";
+import { trialRemaining, consumeTrial, TESTING_UNLIMITED_TRIALS } from "../lib/storage";
 import { isPro, getTrialIdentity } from "../lib/pro";
 import { formatTimestamp, sanitizeFilename } from "../lib/utils";
 import { extFor } from "../lib/capture";
@@ -645,10 +645,12 @@ async function doCapture(cfg?: CaptureConfig) {
   if (config.format === "pdf" && config.captureType !== "fullPage") config.format = "png";
   // Trial gate (PRO bypasses): 4K/8K need a signed-in identity first (so a
   // cache clear alone can't mint fresh trials), then 2 free shots/day each.
+  // TESTING BYPASS: when TESTING_UNLIMITED_TRIALS is true, 4K/8K skip the
+  // identity requirement, the exhaustion check, and all consumption below.
   const pro = await isPro();
   const trialQ = config.quality === "4K" || config.quality === "8K" ? config.quality : null;
   let trialEmail = "";
-  if (trialQ && !pro) {
+  if (trialQ && !pro && !TESTING_UNLIMITED_TRIALS) {
     const identity = await getTrialIdentity();
     if (!identity) throw new Error("LOGIN_REQUIRED");
     trialEmail = identity;
@@ -666,7 +668,7 @@ async function doCapture(cfg?: CaptureConfig) {
       // restricted page: capture + resize fully in the service worker
       res = await captureVisibleSW(tab, config);
     }
-    if (!pro && (config.quality === "4K" || config.quality === "8K")) {
+    if (!pro && !TESTING_UNLIMITED_TRIALS && (config.quality === "4K" || config.quality === "8K")) {
       await consumeTrial(config.quality, trialEmail);
     }
     const clip = await copyReport(tab.id, res.dataUrl, config.format);
@@ -675,7 +677,7 @@ async function doCapture(cfg?: CaptureConfig) {
   }
   if (config.captureType === "fullPage") {
     const res = await captureFullPageLoop(tab, config);
-    if (!pro && (config.quality === "4K" || config.quality === "8K")) {
+    if (!pro && !TESTING_UNLIMITED_TRIALS && (config.quality === "4K" || config.quality === "8K")) {
       await consumeTrial(config.quality, trialEmail);
     }
     const summary = (res.parts ?? 1) > 1
@@ -691,7 +693,7 @@ async function doCapture(cfg?: CaptureConfig) {
   }
   // region / element need user interaction
   await ensureContent(tab.id, tab.url ?? "");
-  if (!pro && (config.quality === "4K" || config.quality === "8K") && tab.id != null) {
+  if (!pro && !TESTING_UNLIMITED_TRIALS && (config.quality === "4K" || config.quality === "8K") && tab.id != null) {
     pendingTrial.set(tab.id, { q: config.quality, email: trialEmail });
   }
   await sendToTab(tab.id, { type: "CS_START_PICK", mode: config.captureType });
@@ -795,7 +797,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // content script selected rect/element screenshot already processed; just download + toast
       const pending = sender.tab?.id != null ? pendingTrial.get(sender.tab.id) : undefined;
       if (sender.tab?.id != null) pendingTrial.delete(sender.tab.id);
-      if (pending) await consumeTrial(pending.q, pending.email);
+      if (pending && !TESTING_UNLIMITED_TRIALS) await consumeTrial(pending.q, pending.email);
       await downloadDataUrl(msg.dataUrl, msg.format, "", sender.tab?.id);
       const clip = await copyReport(sender.tab?.id, msg.dataUrl, msg.format);
       if (sender.tab?.id != null) {

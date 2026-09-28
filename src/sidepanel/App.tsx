@@ -17,6 +17,7 @@ import {
   trialRemaining,
   TRIAL_DAILY_4K,
   TRIAL_DAILY_8K,
+  TESTING_UNLIMITED_TRIALS,
   updatePreset,
 } from "../lib/storage";
 import { isPro, getTrialIdentity } from "../lib/pro";
@@ -133,7 +134,7 @@ export default function App() {
 
   const fireCapture = async (config: { captureType: CaptureType; quality: Quality; format: Format }) => {
     if (busy) return;
-    if (!pro && (config.quality === "4K" || config.quality === "8K")) {
+    if (!TESTING_UNLIMITED_TRIALS && !pro && (config.quality === "4K" || config.quality === "8K")) {
       if (!identity) {
         setProOpen("login");
         return;
@@ -154,7 +155,8 @@ export default function App() {
 
   const activePreset = presets.find((p) => p.id === activeId) ?? null;
   // Trial qualities lock with a gold badge once today's free shots run out.
-  const lockedQualities: Quality[] = pro
+  // TEST MODE bypass: never lock while TESTING_UNLIMITED_TRIALS is on.
+  const lockedQualities: Quality[] = pro || TESTING_UNLIMITED_TRIALS
     ? []
     : [
         ...(trialLeft <= 0 ? ["4K" as Quality] : []),
@@ -221,6 +223,13 @@ export default function App() {
         >
           {pro ? (
             <span>✓ Pro active — unlimited 4K and 8K</span>
+          ) : TESTING_UNLIMITED_TRIALS ? (
+            <span>
+              <span className="mr-1.5 rounded border border-amber-500/60 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-extrabold tracking-wide text-amber-600 dark:text-amber-400">
+                TEST MODE
+              </span>
+              Trial today: 4K {trialLeft}/{TRIAL_DAILY_4K} · 8K {trialLeft8k}/{TRIAL_DAILY_8K} free left
+            </span>
           ) : identity ? (
             <span>Trial today: 4K {trialLeft}/{TRIAL_DAILY_4K} · 8K {trialLeft8k}/{TRIAL_DAILY_8K} free left</span>
           ) : (
@@ -280,7 +289,7 @@ export default function App() {
                         setProOpen(identity ? "upsell" : "login");
                         return;
                       }
-                      if (!pro && (q === "4K" || q === "8K")) {
+                      if (!pro && !TESTING_UNLIMITED_TRIALS && (q === "4K" || q === "8K")) {
                         if (!identity) {
                           setProOpen("login");
                           return;

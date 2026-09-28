@@ -114,6 +114,8 @@ export const TRIAL_DAILY = 2;
 export type TrialQuality = "4K" | "8K";
 // Back-compat alias (older code/tests reference the 4K-only name).
 export const TRIAL_DAILY_4K = TRIAL_DAILY;
+// TESTING ONLY — set false before any store build.
+export const TESTING_UNLIMITED_TRIALS = true;
 // Dedicated 8K constant (same value for now; kept separate so a future
 // limit change for one quality doesn't silently couple the other).
 export const TRIAL_DAILY_8K = TRIAL_DAILY;
