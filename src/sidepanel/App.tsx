@@ -12,6 +12,7 @@ import { applyTheme } from "../lib/theme";
 import {
   deletePreset,
   getStore,
+  reconcileTrial,
   savePreset,
   saveSettings,
   setActivePreset,
@@ -21,7 +22,7 @@ import {
   TESTING_UNLIMITED_TRIALS,
   updatePreset,
 } from "../lib/storage";
-import { isPro, getTrialIdentity } from "../lib/pro";
+import { isPro, getTrialIdentity, fetchTrial } from "../lib/pro";
 import { uid } from "../lib/utils";
 import { APP_VERSION } from "../lib/version";
 import type { CaptureType, Format, Preset, Quality } from "../types";
@@ -49,6 +50,40 @@ export default function App() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [clipboard, setClipboard] = useState(false);
 
+  // Display-only server refresh: fetch the authoritative server trial,
+  // reconcile local counters up (max(local, server)), then re-read local
+  // (post-reconcile remaining = min(server, local)). Offline/unreachable
+  // keeps local values silently — no toast, this is display-only.
+  const refreshTrialDisplay = useCallback((email: string | null) => {
+    const em = email ?? "";
+    const loadLocal = () => {
+      trialRemaining("4K", em).then(setTrialLeft).catch(() => undefined);
+      trialRemaining("8K", em).then(setTrialLeft8k).catch(() => undefined);
+    };
+    if (!em) {
+      loadLocal();
+      return;
+    }
+    (async () => {
+      try {
+        const t = await fetchTrial(em);
+        if (!t) {
+          loadLocal();
+          return;
+        }
+        const daily = Number.isFinite(t.daily) && t.daily > 0 ? t.daily : TRIAL_DAILY_4K;
+        try {
+          await reconcileTrial(em, daily - t.remaining4k, daily - t.remaining8k);
+        } catch {
+          /* keep local values */
+        }
+        loadLocal();
+      } catch {
+        loadLocal();
+      }
+    })();
+  }, []);
+
   useEffect(() => {
     getStore().then((s) => {
       setPresets(s.presets);
@@ -62,12 +97,7 @@ export default function App() {
       // respect whatever the user last chose.
       setClipboard(s.settings.clipboard === true);
     });
-    const loadTrials = (email: string | null) => {
-      const em = email ?? "";
-      trialRemaining("4K", em).then(setTrialLeft).catch(() => undefined);
-      trialRemaining("8K", em).then(setTrialLeft8k).catch(() => undefined);
-    };
-    loadTrials(null);
+    refreshTrialDisplay(null);
     isPro().then(setPro).catch(() => undefined);
     // Pro can flip while the panel is open (unlock/refresh elsewhere):
     // follow the same `proPaid` cache — no reload needed.
@@ -83,7 +113,9 @@ export default function App() {
     getTrialIdentity()
       .then((email) => {
         setIdentity(email);
-        if (email) loadTrials(email);
+        // Panel open: refresh display from the server so cross-device
+        // consumption shows immediately (offline keeps local silently).
+        if (email) refreshTrialDisplay(email);
       })
       .catch(() => undefined);
     // Reopened after a gated 4K/8K attempt: go straight to sign-in or upsell.
@@ -97,7 +129,7 @@ export default function App() {
       })
       .catch(() => undefined);
     return () => chrome.storage.onChanged.removeListener(onProChanged);
-  }, []);
+  }, [refreshTrialDisplay]);
 
   // Pro-gated panel chrome (e.g. gold scrollbars in globals.css) mirrors the
   // `.dark` theme approach: a `pro` class on <html>, styled in the panel stylesheet.
@@ -510,8 +542,9 @@ export default function App() {
           }}
           onSignedIn={(email) => {
             setIdentity(email);
-            trialRemaining("4K", email).then(setTrialLeft).catch(() => undefined);
-            trialRemaining("8K", email).then(setTrialLeft8k).catch(() => undefined);
+            // Sign-in: display must reflect server-authoritative counts at
+            // once (not stale local until the next capture reconciles).
+            refreshTrialDisplay(email);
           }}
         />
       )}
