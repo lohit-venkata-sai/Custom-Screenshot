@@ -16,6 +16,7 @@ import {
   setActivePreset,
   trialRemaining,
   TRIAL_DAILY_4K,
+  TRIAL_DAILY_8K,
   updatePreset,
 } from "../lib/storage";
 import { isPro, getTrialIdentity } from "../lib/pro";
@@ -221,7 +222,7 @@ export default function App() {
           {pro ? (
             <span>✓ Pro active — unlimited 4K and 8K</span>
           ) : identity ? (
-            <span>Trial today: 4K {trialLeft}/{TRIAL_DAILY_4K} · 8K {trialLeft8k}/{TRIAL_DAILY_4K} free left</span>
+            <span>Trial today: 4K {trialLeft}/{TRIAL_DAILY_4K} · 8K {trialLeft8k}/{TRIAL_DAILY_8K} free left</span>
           ) : (
             <span>Guest — sign in for the 4K/8K daily trial</span>
           )}
@@ -271,7 +272,7 @@ export default function App() {
                             ? undefined
                             : identity
                               ? trialLeft8k
-                              : TRIAL_DAILY_4K
+                              : TRIAL_DAILY_8K
                           : undefined
                     }
                     onClick={() => {
@@ -302,9 +303,9 @@ export default function App() {
                   />
                 ))}
               </div>
-              {!pro && (trialLeft < TRIAL_DAILY_4K || trialLeft8k < TRIAL_DAILY_4K) && (
+              {!pro && (trialLeft < TRIAL_DAILY_4K || trialLeft8k < TRIAL_DAILY_8K) && (
                 <p className="mt-1.5 text-[12px] text-muted-foreground">
-                  Trial today: 4K {trialLeft}/{TRIAL_DAILY_4K} · 8K {trialLeft8k}/{TRIAL_DAILY_4K} free left.
+                  Trial today: 4K {trialLeft}/{TRIAL_DAILY_4K} · 8K {trialLeft8k}/{TRIAL_DAILY_8K} free left.
                 </p>
               )}
               {pro && (
@@ -429,7 +430,7 @@ export default function App() {
             setPro(false);
             // Signed out = no tracked usage: badges fall back to the full daily count.
             setTrialLeft(TRIAL_DAILY_4K);
-            setTrialLeft8k(TRIAL_DAILY_4K);
+            setTrialLeft8k(TRIAL_DAILY_8K);
             setProfileOpen(false);
             chrome.storage.local.remove(["trialEmail", "proPaid"]).catch(() => undefined);
           }}
