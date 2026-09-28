@@ -182,8 +182,9 @@ async function copyToClipboard(dataUrl: string, tabId?: number | null): Promise<
         await new Promise((r) => setTimeout(r, 350));
       }
     }
-    // Offscreen failed: fall back to a page-context write (clipboardWrite
-    // permission), which succeeds when the tab is focused.
+    // Offscreen failed: fall back to a page-context write (no extra
+    // permission needed — clipboard.write first, execCommand fallback),
+    // which succeeds when the tab is focused.
     if (tabId != null) {
       try {
         const res = await sendToTab<{ ok?: boolean; error?: string }>(tabId, {

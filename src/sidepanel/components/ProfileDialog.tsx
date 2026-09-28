@@ -86,20 +86,30 @@ export function ProfileDialog({
         )}
 
         <h4 className="mt-4 text-[13px] font-bold uppercase tracking-wide text-muted-foreground">Settings</h4>
-        <label className="mt-2 flex cursor-pointer items-center justify-between rounded-xl border border-border p-3 opacity-70">
+        <label className="mt-2 flex cursor-pointer items-center justify-between rounded-xl border border-border p-3">
           <span className="text-[13.5px]">
             Copy to clipboard
-            <span className="block text-[12px] text-muted-foreground">Coming soon — under rework</span>
+            <span className="block text-[12px] text-muted-foreground">
+              {clipboard ? "Screenshots also copy to clipboard" : "Also copy screenshots to clipboard"}
+            </span>
           </span>
           <button
             role="switch"
-            aria-checked={false}
-            aria-disabled={true}
-            aria-label="Copy screenshots to clipboard (coming soon)"
-            disabled
-            className="relative h-6 w-11 shrink-0 cursor-not-allowed rounded-full transition-colors bg-muted"
+            aria-checked={clipboard}
+            aria-label="Copy screenshots to clipboard"
+            onClick={(e) => {
+              e.preventDefault();
+              onClipboardChange(!clipboard);
+            }}
+            className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+              clipboard ? "bg-[#2563EB]" : "bg-muted"
+            }`}
           >
-            <span className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all left-0.5" />
+            <span
+              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
+                clipboard ? "left-[22px]" : "left-0.5"
+              }`}
+            />
           </button>
         </label>
 

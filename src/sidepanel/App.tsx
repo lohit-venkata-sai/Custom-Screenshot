@@ -55,11 +55,9 @@ export default function App() {
       setFormat(s.settings.format);
       setTheme(s.settings.theme);
       applyTheme(s.settings.theme);
-      // Clipboard is parked for rework: force off (stale enabled flags).
-      setClipboard(false);
-      if (s.settings.clipboard) {
-        saveSettings({ clipboard: false }).catch(() => undefined);
-      }
+      // Clipboard defaults OFF (storage.ts) so existing users are unaffected;
+      // respect whatever the user last chose.
+      setClipboard(s.settings.clipboard === true);
     });
     const loadTrials = (email: string | null) => {
       const em = email ?? "";
