@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Camera, Bookmark, User } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { CaptureTab } from "./components/CaptureTab";
+import { CaptureLogs } from "./components/CaptureLogs";
 import { PresetsTab, EditPresetDialog } from "./components/PresetsTab";
 import { ProModal, type ProModalMode } from "./components/ProModal";
 import { ProfileDialog } from "./components/ProfileDialog";
@@ -401,6 +402,14 @@ export default function App() {
           </>
         )}
       </main>
+
+      {/* Test-mode only: collapsible diagnostics log pinned at the bottom.
+          Hidden entirely (not just collapsed) in store builds. */}
+      {TESTING_UNLIMITED_TRIALS && (
+        <div className="px-4 pb-2 max-w-[480px] mx-auto">
+          <CaptureLogs />
+        </div>
+      )}
 
       <footer className="pb-3 text-center text-[11px] text-muted-foreground">
         Custom Screenshot v{APP_VERSION}

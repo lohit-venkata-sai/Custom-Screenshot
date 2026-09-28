@@ -362,6 +362,7 @@ function startRegion(overlay: HTMLElement) {
       // let the browser repaint without our overlay before capturing
       await new Promise((r) => setTimeout(r, 120));
       const cfg = await readActiveConfig();
+      const t0 = Date.now();
       const boosted = await requestBoosted(cfg.quality, { x, y, width: w, height: h });
       const raw = boosted.raw ?? (await requestRaw());
       const cropped = await cropDataUrl(raw, { x, y, width: w, height: h }, cfg.quality, cfg.format);
@@ -371,6 +372,14 @@ function startRegion(overlay: HTMLElement) {
         width: cropped.width,
         height: cropped.height,
         format: cfg.format,
+        captureType: "region",
+        quality: cfg.quality,
+        rect: { x: Math.round(x), y: Math.round(y), width: Math.round(w), height: Math.round(h) },
+        boostDsf: boosted.dsf,
+        boostDsfFit: boosted.dsfFit,
+        failReason: boosted.failReason,
+        rawReason: boosted.rawReason,
+        durationMs: Date.now() - t0,
       });
       if (!boosted.raw) boostFallbackToast(boosted.failReason, cfg.quality);
     } catch (err) {
@@ -476,6 +485,7 @@ function startElement(overlay: HTMLElement) {
     try {
       await new Promise((res) => setTimeout(res, 120));
       const cfg = await readActiveConfig();
+      const t0 = Date.now();
       const boosted = await requestBoosted(cfg.quality, {
         x: Math.max(0, r.x),
         y: Math.max(0, r.y),
@@ -495,6 +505,14 @@ function startElement(overlay: HTMLElement) {
         width: cropped.width,
         height: cropped.height,
         format: cfg.format,
+        captureType: "element",
+        quality: cfg.quality,
+        rect: { x: Math.round(Math.max(0, r.x)), y: Math.round(Math.max(0, r.y)), width: Math.round(w), height: Math.round(h) },
+        boostDsf: boosted.dsf,
+        boostDsfFit: boosted.dsfFit,
+        failReason: boosted.failReason,
+        rawReason: boosted.rawReason,
+        durationMs: Date.now() - t0,
       });
       if (!boosted.raw) boostFallbackToast(boosted.failReason, cfg.quality);
     } catch (err) {
@@ -543,28 +561,42 @@ function requestRaw(): Promise<string> {
 /** Boosted shot with fallback detail: raw set on success; failReason set
  * ONLY when boost was wanted but blocked (caller classifies it for the
  * warning toast). Null failReason = boost pointless ("screen suffices" /
- * "no geometry") or messaging failure — caller stays silent. */
+ * "no geometry") or messaging failure — caller stays silent.
+ * rawReason always classifies a miss for diagnostics (CS_FINISH_PICK echoes
+ * it so the background log keeps screen-suffices vs no-geometry distinct);
+ * dsf/dsfFit echo the background's computed-vs-clamped density on success. */
 function requestBoosted(
   quality: Quality,
   rect?: { x: number; y: number; width: number; height: number }
-): Promise<{ raw: string | null; failReason: string | null }> {
+): Promise<{ raw: string | null; failReason: string | null; rawReason: string | null; dsf: number | null; dsfFit: number | null }> {
+  const classify = (err: string): string => {
+    if (/screen suffices/i.test(err)) return "screen-suffices";
+    if (/no geometry/i.test(err)) return "no-geometry";
+    return err || "boost failed";
+  };
   return new Promise((resolve) => {
     try {
       chrome.runtime.sendMessage({ type: "CS_CAPTURE_BOOSTED_VISIBLE", quality, rect }, (res) => {
         if (chrome.runtime.lastError) {
-          resolve({ raw: null, failReason: null });
+          resolve({ raw: null, failReason: null, rawReason: "boost failed", dsf: null, dsfFit: null });
           return;
         }
         if (res?.ok) {
-          resolve({ raw: res.raw as string, failReason: null });
+          resolve({
+            raw: res.raw as string,
+            failReason: null,
+            rawReason: null,
+            dsf: Number.isFinite(res.dsf) ? (res.dsf as number) : null,
+            dsfFit: Number.isFinite(res.dsfFit) ? (res.dsfFit as number) : null,
+          });
           return;
         }
         const err = String(res?.error ?? "");
-        if (/screen suffices|no geometry/i.test(err)) resolve({ raw: null, failReason: null });
-        else resolve({ raw: null, failReason: err || "boost failed" });
+        if (/screen suffices|no geometry/i.test(err)) resolve({ raw: null, failReason: null, rawReason: classify(err), dsf: null, dsfFit: null });
+        else resolve({ raw: null, failReason: err || "boost failed", rawReason: classify(err), dsf: null, dsfFit: null });
       });
     } catch {
-      resolve({ raw: null, failReason: null });
+      resolve({ raw: null, failReason: null, rawReason: "boost failed", dsf: null, dsfFit: null });
     }
   });
 }

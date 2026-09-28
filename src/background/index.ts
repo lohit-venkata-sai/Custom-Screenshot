@@ -5,6 +5,7 @@ import { trialRemaining, consumeTrial, TESTING_UNLIMITED_TRIALS } from "../lib/s
 import { isPro, getTrialIdentity } from "../lib/pro";
 import { formatTimestamp, sanitizeFilename } from "../lib/utils";
 import { extFor } from "../lib/capture";
+import { pushDiag, getDiagLogs, diagTs, fmtBoost, diagRawReason, diagPickReason, fmtRect } from "../lib/diag";
 import { jpegPagesToPdfDataUrl, type PdfPageImage } from "../lib/pdf";
 
 async function activeTab(): Promise<chrome.tabs.Tab | null> {
@@ -251,6 +252,7 @@ async function withOverlayHidden<T>(tabId: number, fn: () => Promise<T>): Promis
 
 async function captureVisiblePreset(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
   if (tab.id == null) throw new Error("No active tab");
+  const t0 = Date.now();
   await ensureContent(tab.id, tab.url ?? "");
   // Augustat path: re-render the same viewport at higher density when the
   // screen alone can't reach the requested quality. Falls back to raw,
@@ -276,6 +278,9 @@ async function captureVisiblePreset(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
         }
       });
       await downloadDataUrl(res.dataUrl, cfg.format, "", tab.id);
+      const dpr = geom.dpr || 1;
+      const rawBoost = targetH / (Math.max(1, geom.viewportH) * Math.max(0.5, dpr));
+      pushDiag(`[${diagTs()}] visible ${cfg.quality} ${fmtBoost(dpr * boost, dpr * rawBoost)} ${res.width}×${res.height} ${Date.now() - t0}ms`);
       return res;
     } catch (e) {
       boostErr = e; // fall through to classic path, warn below
@@ -291,6 +296,8 @@ async function captureVisiblePreset(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
     });
   });
   await downloadDataUrl(res.dataUrl, cfg.format, "", tab.id);
+  const reason = !geom ? "no-geometry" : boost <= 1 ? "screen-suffices" : diagRawReason(boostErr);
+  pushDiag(`[${diagTs()}] visible ${cfg.quality} RAW(${reason}) ${res.width}×${res.height} ${Date.now() - t0}ms`);
   if (boostErr && !isNoBenefit(boostErr) && (cfg.quality === "4K" || cfg.quality === "8K")) {
     await feedback(tab.id, "High-res boost unavailable", boostFallbackBody(boostErr), true);
   }
@@ -326,7 +333,8 @@ async function captureFullPageEmu(
     if (W <= 0 || H <= 0) throw new Error("Could not measure the page.");
     const dpr = geom?.dpr || 1;
     const zoomQ = cfg.quality === "4K" || cfg.quality === "8K" ? 2 : cfg.quality === "2K" ? 1.5 : 1;
-    const dsf = Math.max(0.25, Math.min(dpr * zoomQ, 16000 / H, 16000 / W));
+    const dsfFit = dpr * zoomQ;
+    const dsf = Math.max(0.25, Math.min(dsfFit, 16000 / H, 16000 / W));
     await dbgSend(tabId, "Emulation.setDeviceMetricsOverride", {
       width: W,
       height: H,
@@ -342,7 +350,7 @@ async function captureFullPageEmu(
     try {
       const final = await finalizeBitmapSW(bmp, cfg, "width");
       await downloadDataUrl(final.dataUrl, cfg.format, "", tabId);
-      return { ...final, parts: 1 };
+      return { ...final, parts: 1, dsf, dsfFit };
     } finally {
       bmp.close();
     }
@@ -356,15 +364,22 @@ async function captureFullPageEmu(
 
 async function captureFullPageLoop(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
   const tabId = tab.id!;
+  const t0 = Date.now();
   await ensureContent(tabId, tab.url ?? "");
   const geom = await pageGeom(tabId);
   try {
-    return await captureFullPageEmu(tab, cfg, geom);
+    const res = await captureFullPageEmu(tab, cfg, geom);
+    pushDiag(`[${diagTs()}] fullPage ${cfg.quality} ${fmtBoost(res.dsf, res.dsfFit)} ${res.width}×${res.height} ${Date.now() - t0}ms`);
+    return res;
   } catch (e) {
     if (e instanceof Error && /DBG_ATTACHED_ELSEWHERE/.test(e.message)) {
+      pushDiag(`[${diagTs()}] fullPage ${cfg.quality} RAW(devtools-blocked) 0×0 ${Date.now() - t0}ms`);
       throw new Error("Close DevTools (F12) and try again — only one debugger can run at a time.");
     }
-    return captureFullPageScroll(tab, cfg);
+    const fbErr = e;
+    const res = await captureFullPageScroll(tab, cfg);
+    pushDiag(`[${diagTs()}] fullPage ${cfg.quality} RAW(${diagRawReason(fbErr)}) ${res.width}×${res.height} ${Date.now() - t0}ms`);
+    return res;
   }
 }
 
@@ -475,11 +490,13 @@ function blobToDataUrl(blob: Blob): Promise<string> {
  * Resizes with OffscreenCanvas; never upscales.
  */
 async function captureVisibleSW(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
+  const t0 = Date.now();
   const raw = await captureVisibleRateLimited(tab.windowId, false);
   const bmp = await createImageBitmap(await (await fetch(raw)).blob());
   try {
     const final = await finalizeBitmapSW(bmp, cfg);
     await downloadDataUrl(final.dataUrl, cfg.format, "", tab.id);
+    pushDiag(`[${diagTs()}] visible ${cfg.quality} RAW(restricted-page) ${final.width}×${final.height} ${Date.now() - t0}ms`);
     return final;
   } finally {
     bmp.close();
@@ -830,6 +847,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!geom) throw new Error("no geometry");
       const dpr = geom.dpr || 1;
       let dsf: number;
+      let dsfFit: number;
       const r = msg.rect as
         | { x?: number; y?: number; width?: number; height?: number }
         | undefined;
@@ -840,12 +858,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         (r.width as number) > 0 &&
         (r.height as number) > 0
       ) {
+        dsfFit = Math.min(FIT_W / (r.width as number), FIT_H / (r.height as number));
         dsf = fitDsfForRect(r.width as number, r.height as number, geom.viewportW, geom.viewportH);
         if (!(dsf > dpr)) throw new Error("screen suffices");
       } else {
         const targetH = QUALITY_HEIGHT[(msg.quality as CaptureConfig["quality"]) ?? "1080p"];
         const boost = boostFor(geom.viewportH, dpr, targetH);
         if (boost <= 1) throw new Error("screen suffices");
+        dsfFit = dpr * (targetH / (Math.max(1, geom.viewportH) * Math.max(0.5, dpr)));
         dsf = dpr * boost;
       }
       const res = await withOverlayHidden(tab.id, async () => {
@@ -857,12 +877,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         );
         return blobToDataUrl(u8ToBlob(shot.bytes, shot.mime));
       });
-      sendResponse({ ok: true, raw: res });
+      sendResponse({ ok: true, raw: res, dsf, dsfFit });
     } else if (msg.type === "CS_DOWNLOAD") {
       await downloadDataUrl(msg.dataUrl, msg.format, "", sender.tab?.id);
       sendResponse({ ok: true });
     } else if (msg.type === "CS_FINISH_PICK") {
-      // content script selected rect/element screenshot already processed; just download + toast
+      // content script selected rect/element screenshot already processed; just download + toast.
+      // Extended payload (captureType/quality/rect/boostDsf/boostDsfFit/failReason/rawReason/durationMs)
+      // feeds the test-mode diagnostics log — one line per capture.
+      const pickType = msg.captureType === "element" ? "element" : "region";
+      const pickQuality = typeof msg.quality === "string" ? msg.quality : "?";
+      const durMs = Number.isFinite(msg.durationMs) ? Math.max(0, Math.round(msg.durationMs)) : 0;
+      const dimsKnown = Number.isFinite(msg.width) && Number.isFinite(msg.height);
+      const path = msg.boostDsf != null && Number.isFinite(msg.boostDsf)
+        ? fmtBoost(Number(msg.boostDsf), Number.isFinite(msg.boostDsfFit) ? Number(msg.boostDsfFit) : Number(msg.boostDsf))
+        : `RAW(${diagPickReason(msg.failReason ?? null, msg.rawReason ?? null)})`;
+      pushDiag(
+        `[${diagTs()}] ${pickType} ${pickQuality} ${path}${fmtRect(msg.rect)} ${dimsKnown ? `${msg.width}×${msg.height}` : "?×?"} ${durMs}ms`
+      );
       const pending = sender.tab?.id != null ? pendingTrial.get(sender.tab.id) : undefined;
       if (sender.tab?.id != null) pendingTrial.delete(sender.tab.id);
       if (pending && !TESTING_UNLIMITED_TRIALS) await consumeTrial(pending.q, pending.email);
@@ -886,6 +918,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await maybeReopenPanel(sender.tab.id);
       }
       sendResponse({ ok: true });
+    } else if (msg.type === "CS_GET_DIAG_LOGS") {
+      // Test-mode diagnostics: newest-first lines from the in-memory ring.
+      sendResponse({ ok: true, logs: getDiagLogs() });
     } else if (msg.type === "CS_OPEN_PANEL") {
       const tab = sender.tab ?? (await activeTab());
       await openPanelForTab(tab?.id);
