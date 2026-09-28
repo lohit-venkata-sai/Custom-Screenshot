@@ -746,24 +746,30 @@ function boostFor(cssH: number, dpr: number, targetH: number): number {
 }
 
 // Element/region fit-to-density: size DSF so the SELECTED RECT (CSS px)
-// fills an 8K frame (7680×4320 genuine pixels) instead of scaling to the
-// viewport. CSS viewport size stays unchanged (no reflow) — only density
-// rises, then the caller crops rect×dsf out of the dense bitmap.
+// fills the quality's frame (4K: 3840×2160, 8K: 7680×4320 genuine pixels)
+// instead of scaling to the viewport. Free qualities (720p/1080p/2K) skip
+// the fit and use the viewport-based boostFor path. CSS viewport size stays
+// unchanged (no reflow) — only density rises, then the caller crops
+// rect×dsf out of the dense bitmap.
 // Hard limits: absolute DSF_CAP, Chrome's 16000px/side bitmap cap, and a
 // total pixel budget (viewport W×H×dsf²). An over-budget fit-DSF clamps
 // best-effort; the success toast reports actual dims.
-const FIT_W = 7680;
-const FIT_H = 4320;
 const DSF_CAP = 6; // 6× linear = 36× pixels. Beyond this Chrome's
 // captureScreenshot/emulation OOMs or flakes on typical viewports, and a
 // 2560px-wide viewport already nears the 16k side cap at 6× (15360px).
 const MAX_BOOSTED_PX = 36_000_000; // ~one 8K frame (7680×4320 = 33.2MP)
 // + headroom: worst case ~144MB RGBA, inside Chrome's capture path. Small
 // rects can still reach full 8K density; large viewports clamp best-effort.
-function fitDsfForRect(rectW: number, rectH: number, cssW: number, cssH: number): number {
+function fitDsfForRect(
+  rectW: number,
+  rectH: number,
+  cssW: number,
+  cssH: number,
+  quality: "4K" | "8K"
+): number {
   const rw = Math.max(1, rectW);
   const rh = Math.max(1, rectH);
-  const fit = Math.min(FIT_W / rw, FIT_H / rh);
+  const fit = Math.min(QUALITY_WIDTH[quality] / rw, QUALITY_HEIGHT[quality] / rh);
   const vw = Math.max(1, Math.round(cssW));
   const vh = Math.max(1, Math.round(cssH));
   const budget = Math.sqrt(MAX_BOOSTED_PX / (vw * vh));
@@ -949,10 +955,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ ok: true, raw });
     } else if (msg.type === "CS_CAPTURE_BOOSTED_VISIBLE") {
       // Re-render the viewport at higher density for region/element crops.
-      // With msg.rect (CSS px) the DSF fits THAT RECT into an 8K frame
-      // (DSF-only, viewport CSS size unchanged); without it, falls back to
-      // viewport-based boostFor. Throws when pointless (screen suffices)
-      // or blocked — caller falls back to raw.
+      // 4K/8K with msg.rect (CSS px): DSF fits THAT RECT into the quality's
+      // frame (4K: 3840×2160, 8K: 7680×4320; DSF-only, viewport CSS size
+      // unchanged). Free qualities (720p/1080p/2K) and rect-less calls use
+      // the viewport-based boostFor path. Throws when pointless
+      // (screen suffices) or blocked — caller falls back to raw.
       const tab = sender.tab ?? (await activeTab());
       if (!tab || tab.id == null) throw new Error("No tab");
       const geom = await pageGeom(tab.id);
@@ -963,18 +970,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const r = msg.rect as
         | { x?: number; y?: number; width?: number; height?: number }
         | undefined;
+      const q = (msg.quality as CaptureConfig["quality"]) ?? "1080p";
+      const isFitQuality = q === "4K" || q === "8K";
       if (
+        isFitQuality &&
         r &&
         Number.isFinite(r.width) &&
         Number.isFinite(r.height) &&
         (r.width as number) > 0 &&
         (r.height as number) > 0
       ) {
-        dsfFit = Math.min(FIT_W / (r.width as number), FIT_H / (r.height as number));
-        dsf = fitDsfForRect(r.width as number, r.height as number, geom.viewportW, geom.viewportH);
+        dsfFit = Math.min(
+          QUALITY_WIDTH[q] / (r.width as number),
+          QUALITY_HEIGHT[q] / (r.height as number)
+        );
+        dsf = fitDsfForRect(r.width as number, r.height as number, geom.viewportW, geom.viewportH, q);
         if (!(dsf > dpr)) throw new Error("screen suffices");
       } else {
-        const targetH = QUALITY_HEIGHT[(msg.quality as CaptureConfig["quality"]) ?? "1080p"];
+        const targetH = QUALITY_HEIGHT[q];
         const boost = boostFor(geom.viewportH, dpr, targetH);
         if (boost <= 1) throw new Error("screen suffices");
         dsfFit = dpr * (targetH / (Math.max(1, geom.viewportH) * Math.max(0.5, dpr)));
