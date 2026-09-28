@@ -45,14 +45,15 @@ function pillHTML(): string {
     .cs-main{display:flex;align-items:center;gap:9px;background:transparent;border:none;border-right:1px solid rgba(255,255,255,.35);color:#fff;padding:10px 20px;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap;}
     .cs-main:hover{background:rgba(255,255,255,.14);}
     .cs-main:focus-visible,.cs-arrow:focus-visible{outline:2px solid #fff;outline-offset:-2px;}
-    .cs-arrow{display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.10);border:none;color:#fff;padding:10px 14px;font-size:12px;cursor:pointer;}
+    .cs-arrow{display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.10);border:none;color:#fff;padding:10px 12px;font-size:12px;cursor:pointer;}
     .cs-arrow:hover{background:rgba(255,255,255,.22);}
+    .cs-arrow svg{display:block;}
     .cs-hint{margin-top:8px;display:inline-block;background:rgba(15,23,42,.8);backdrop-filter:blur(8px);color:#fff;font-size:12px;padding:4px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.2);}
   </style>
   <div class="cs-focus" id="cs-focus" role="toolbar" aria-label="Custom Screenshot quick capture">
     <div class="cs-pill">
       <button class="cs-main" id="cs-focus-capture" aria-label="Capture now with the active preset">Capture</button>
-      <button class="cs-arrow" id="cs-focus-open" aria-label="Open Custom Screenshot settings panel">▾</button>
+      <button class="cs-arrow" id="cs-focus-open" aria-label="Open Custom Screenshot settings panel"><svg width="4" height="14" viewBox="0 0 4 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="2" cy="2" r="1.6" fill="#fff"/><circle cx="2" cy="7" r="1.6" fill="#fff"/><circle cx="2" cy="12" r="1.6" fill="#fff"/></svg></button>
     </div>
     <div><span class="cs-hint">Click capture, or press Esc to cancel</span></div>
   </div>`;
