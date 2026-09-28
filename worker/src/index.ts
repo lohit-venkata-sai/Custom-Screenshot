@@ -21,14 +21,14 @@ const PLANS: Record<
   { amount: number; currency: string; name: string; description: string }
 > = {
   pro: {
-    amount: 900, // OWNER-TBD (USD smallest unit = cents → $9)
-    currency: "USD", // OWNER-TBD — see USD-activation flag above
+    amount: 90000, // OWNER-TBD (INR paise = ₹900 TEST VALUE)
+    currency: "INR", // OWNER-TBD — UPI needs INR; finalize pricing before live
     name: "Pixel Pro",
     description: "Custom Screenshot Pixel Pro — one-time",
   },
   proplus: {
-    amount: 1900, // OWNER-TBD (USD smallest unit = cents → $19)
-    currency: "USD", // OWNER-TBD — see USD-activation flag above
+    amount: 190000, // OWNER-TBD (INR paise = ₹1900 TEST VALUE)
+    currency: "INR", // OWNER-TBD — UPI needs INR; finalize pricing before live
     name: "Pro+",
     description: "Custom Screenshot Pro+ bulk tier — one-time",
   },
