@@ -2,9 +2,7 @@ import type { CaptureConfig } from "../types";
 import { QUALITY_HEIGHT, QUALITY_WIDTH } from "../types";
 import { getActivePreset, getSettings } from "../lib/storage";
 import { trialRemaining, consumeTrial } from "../lib/storage";
-import { isPro, getTrialIdentity, startProBackground } from "../lib/pro";
-
-startProBackground();
+import { isPro, getTrialIdentity } from "../lib/pro";
 import { formatTimestamp, sanitizeFilename } from "../lib/utils";
 import { extFor } from "../lib/capture";
 import { jpegPagesToPdfDataUrl, type PdfPageImage } from "../lib/pdf";
