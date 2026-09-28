@@ -7,10 +7,10 @@ compatibility_date = "2024-11-01"
 # then paste the returned id below.
 [[kv_namespaces]]
 binding = "LICENSES"
-id = "REPLACE-WITH-KV-NAMESPACE-ID"
+id = "5bd40ed40e5048d08669ceead635cd18"
 
 [vars]
 # Comma-separated list of extension origins allowed to call /api/order and
 # /api/license. The chrome-extension:// ID varies per build — add the dev ID
 # from chrome://extensions and later the Web Store ID.
-ALLOWED_ORIGINS = "chrome-extension://REPLACE-WITH-EXTENSION-ID"
+ALLOWED_ORIGINS = "chrome-extension://bmnookhlomoadfgpooiijdljclapkkke"

@@ -15,7 +15,7 @@ export const PAYMENTS_LIVE = false;
 
 // TODO(owner): paste the deployed Worker URL here (see worker/README.md),
 // e.g. "https://custom-screenshot-license.<account>.workers.dev".
-export const WORKER_URL = "https://REPLACE-WITH-WORKER.workers.dev";
+export const WORKER_URL = "https://custom-screenshot-license.lohitvenkatasai2004.workers.dev";
 
 /** Backend-supported plans from day one (Pro+ UI lands later). */
 export type ProPlan = "pro" | "proplus";
