@@ -654,6 +654,105 @@ function stickyToRelative() {
   });
 }
 
+// ---------- full-page robustness: lazy-load pass + scroll-container ----------
+
+// Inner element that owns the page's scroll (dashboards, docs with a fixed
+// sidebar): overflow-y scroll/auto with >200px of hidden content, holding
+// MORE hidden content than the document itself. Viewport expansion can't grow
+// such constrained layouts, so they stitch within the container instead.
+let fpContainerSaved: { el: HTMLElement; top: number } | null = null;
+
+function findMainScrollContainer(): HTMLElement | null {
+  let best: HTMLElement | null = null;
+  let bestHidden = 0;
+  const all = document.querySelectorAll("*");
+  all.forEach((n) => {
+    const el = n as HTMLElement;
+    if (el.id === HOST_ID || el.id === "cs-pick-overlay" || el.id === DIM_ID) return;
+    let overflowY = "";
+    try {
+      overflowY = getComputedStyle(el).overflowY;
+    } catch {
+      return;
+    }
+    if (overflowY !== "scroll" && overflowY !== "auto") return;
+    const hidden = el.scrollHeight - el.clientHeight;
+    if (hidden > 200 && hidden > bestHidden) {
+      bestHidden = hidden;
+      best = el;
+    }
+  });
+  return best;
+}
+
+function owningScrollContainer(): HTMLElement | null {
+  const m = fullpageMetrics();
+  const c = findMainScrollContainer();
+  if (!c) return null;
+  const hidden = c.scrollHeight - c.clientHeight;
+  const docHidden = m.scrollHeight - m.viewportH;
+  return hidden > 200 && hidden > Math.max(0, docHidden) ? c : null;
+}
+
+function fullpageInspect() {
+  const m = fullpageMetrics();
+  const c = owningScrollContainer();
+  if (c) {
+    const r = c.getBoundingClientRect();
+    fpContainerSaved = { el: c, top: c.scrollTop };
+    return {
+      mode: "container" as const,
+      scrollHeight: m.scrollHeight,
+      viewportH: m.viewportH,
+      viewportW: m.viewportW,
+      dpr: m.dpr,
+      container: {
+        top: Math.max(0, r.top),
+        left: Math.max(0, r.left),
+        width: Math.max(1, r.width),
+        height: Math.max(1, r.height),
+        scrollHeight: c.scrollHeight,
+        scrollTop: c.scrollTop,
+      },
+    };
+  }
+  fpContainerSaved = null;
+  return { mode: "document" as const, ...m };
+}
+
+// Wake-up pass: scroll the main scroller through the whole page in
+// ~80%-viewport steps (150ms settle each) so lazy-loaded images/content load
+// before measuring/capturing. Skipped on short pages (<2 viewports: nothing
+// to lazy-load). Bounded: 40 steps max (~6.5s worst case, ~1-2s typical).
+async function fullpageLazyPass(): Promise<{ didPass: boolean; steps: number }> {
+  const m = fullpageMetrics();
+  if (m.scrollHeight < m.viewportH * 2) return { didPass: false, steps: 0 };
+  const c = owningScrollContainer();
+  const step = Math.max(1, Math.floor((c ? c.clientHeight : m.viewportH) * 0.8));
+  const total = c ? c.scrollHeight : m.scrollHeight;
+  const startY = c ? c.scrollTop : window.scrollY;
+  let steps = 0;
+  for (let y = 0; y < total && steps < 40; y += step, steps++) {
+    if (c) c.scrollTop = y;
+    else window.scrollTo(0, y);
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  // Hit bottom, settle, then return to the start position.
+  if (c) c.scrollTop = c.scrollHeight;
+  else window.scrollTo(0, m.scrollHeight);
+  await new Promise((r) => setTimeout(r, 300));
+  if (c) c.scrollTop = startY;
+  else window.scrollTo(0, startY);
+  await new Promise((r) => setTimeout(r, 100));
+  return { didPass: true, steps };
+}
+
+function containerScrollTo(y: number) {
+  const el = fpContainerSaved?.el ?? owningScrollContainer();
+  if (el) el.scrollTop = y;
+  else window.scrollTo(0, y);
+}
+
 function fullpageMetrics() {
   return {
     scrollHeight: Math.max(
@@ -726,6 +825,14 @@ function fullpageRestore(scrollY: number) {
     }
   });
   stickySaved = [];
+  if (fpContainerSaved) {
+    try {
+      fpContainerSaved.el.scrollTop = fpContainerSaved.top;
+    } catch {
+      /* noop */
+    }
+    fpContainerSaved = null;
+  }
   setFocusSuppressed(false);
   window.scrollTo(0, scrollY);
 }
@@ -775,8 +882,54 @@ async function fullpageStitch(
     const dyPx = Math.round((visTop - rangeStart) * scale);
     ctx.drawImage(img, 0, srcY, img.naturalWidth, srcH, 0, dyPx, img.naturalWidth, srcH);
   }
-  // Full pages keep full WIDTH (like GoFullPage): fit target width + 16K
-  // height cap, never upscale. Height follows aspect — no squeezed strips.
+  return emitFullpageCanvas(canvas, format, targetWidth);
+}
+// Scroll-container composite (dashboard layout): full viewport width; height
+// is fixed chrome (above/below the container) + the container's full content
+// height. The first chunk paints everything (header/sidebar included); later
+// chunks repaint ONLY the container strip at its scrolled offset.
+async function containerStitch(
+  segments: string[],
+  tops: number[],
+  rect: { top: number; left: number; width: number; height: number },
+  totalH: number,
+  quality: Quality,
+  format: Format,
+  targetWidth?: number
+): Promise<{ dataUrl: string; width: number; height: number }> {
+  const m = fullpageMetrics();
+  const first = await loadImage(segments[0]);
+  const scale = first.naturalWidth / m.viewportW;
+  const fixedBottom = Math.max(0, m.viewportH - (rect.top + rect.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = first.naturalWidth;
+  canvas.height = Math.max(1, Math.round((rect.top + totalH + fixedBottom) * scale));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2D unavailable");
+  for (let i = 0; i < segments.length; i++) {
+    const img = i === 0 ? first : await loadImage(segments[i]);
+    if (i === 0) {
+      ctx.drawImage(img, 0, 0);
+      continue;
+    }
+    const srcX = Math.round(rect.left * scale);
+    const srcY = Math.round(rect.top * scale);
+    const srcW = Math.min(img.naturalWidth - srcX, Math.round(rect.width * scale));
+    const srcH = Math.min(img.naturalHeight - srcY, Math.round(rect.height * scale));
+    if (srcW <= 0 || srcH <= 0) continue;
+    const dyPx = Math.round((rect.top + (tops[i] ?? 0)) * scale);
+    ctx.drawImage(img, srcX, srcY, srcW, srcH, srcX, dyPx, srcW, srcH);
+  }
+  return emitFullpageCanvas(canvas, format, targetWidth);
+}
+
+// Full pages keep full WIDTH (like GoFullPage): fit target width + 16K
+// height cap, never upscale. Height follows aspect — no squeezed strips.
+async function emitFullpageCanvas(
+  canvas: HTMLCanvasElement,
+  format: Format,
+  targetWidth?: number
+): Promise<{ dataUrl: string; width: number; height: number }> {
   const fit = Math.min(
     1,
     (targetWidth ?? canvas.width) / canvas.width,
@@ -981,6 +1134,31 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         window.scrollTo(0, msg.y);
         sendResponse({ ok: true });
         break;
+      case "CS_LAZY_PASS": {
+        const out = await fullpageLazyPass();
+        sendResponse(out);
+        break;
+      }
+      case "CS_FULLPAGE_INSPECT":
+        sendResponse(fullpageInspect());
+        break;
+      case "CS_CONTAINER_SCROLL_TO":
+        containerScrollTo(msg.y ?? 0);
+        sendResponse({ ok: true });
+        break;
+      case "CS_FULLPAGE_STITCH_CONTAINER": {
+        const out = await containerStitch(
+          msg.segments,
+          msg.tops,
+          msg.rect,
+          msg.totalH,
+          msg.quality as Quality,
+          msg.format as Format,
+          msg.targetWidth
+        );
+        sendResponse(out);
+        break;
+      }
       case "CS_FULLPAGE_PREP":
         fullpagePrep();
         sendResponse({ ok: true });

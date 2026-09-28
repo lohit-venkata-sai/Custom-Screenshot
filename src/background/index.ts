@@ -328,14 +328,8 @@ async function captureFullPageEmu(
     await chrome.tabs.setZoom(tabId, 1).catch(() => undefined);
     await new Promise((r) => setTimeout(r, 450));
   }
-  // Wake lazy-loaded content with a quick scroll-through (no captures, no quota).
+  // Lazy content was woken by the loop-level CS_LAZY_PASS before measuring.
   const scrollY = await sendToTab<number>(tabId, { type: "CS_GET_SCROLL" }).catch(() => 0);
-  if (geom && geom.scrollHeight > geom.viewportH) {
-    for (let y = 0; y < geom.scrollHeight; y += Math.max(1, geom.viewportH)) {
-      await sendToTab(tabId, { type: "CS_SCROLL_TO", y }).catch(() => undefined);
-      await new Promise((r) => setTimeout(r, 120));
-    }
-  }
   await sendToTab(tabId, { type: "CS_STICKY_REL" }).catch(() => undefined);
   try {
     await dbgAttach(tabId);
@@ -393,7 +387,18 @@ async function captureFullPageLoop(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
   const tabId = tab.id!;
   const t0 = Date.now();
   await ensureContent(tabId, tab.url ?? "");
+  // Wake lazy-loaded content first (no captures, no quota): both the emu and
+  // scroll paths then measure/capture fully-loaded content. No-op on short pages.
+  await sendToTab(tabId, { type: "CS_LAZY_PASS" }).catch(() => undefined);
   const geom = await pageGeom(tabId);
+  // Dashboards whose main scroller is an inner element can't be captured by
+  // viewport expansion (CSS constraints won't grow) — stitch the container.
+  const inspect = await sendToTab<FpInspect>(tabId, { type: "CS_FULLPAGE_INSPECT" }).catch(() => null);
+  if (inspect?.mode === "container" && inspect.container) {
+    const res = await captureFullPageContainer(tab, cfg);
+    pushDiag(`[${diagTs()}] fullPage ${cfg.quality} CONTAINER ${res.width}×${res.height} ${Date.now() - t0}ms`);
+    return res;
+  }
   try {
     const res = await captureFullPageEmu(tab, cfg, geom);
     pushDiag(`[${diagTs()}] fullPage ${cfg.quality} ${fmtBoost(res.dsf, res.dsfFit)} ${res.width}×${res.height} ${Date.now() - t0}ms`);
@@ -486,6 +491,86 @@ async function captureFullPageScroll(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
       await chrome.tabs.setZoom(tabId, prevZoom || 1).catch(() => undefined);
     }
     throw e;
+  }
+}
+
+interface FpContainerInfo {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+  scrollHeight: number;
+  scrollTop: number;
+}
+
+interface FpInspect {
+  mode: "document" | "container";
+  viewportW: number;
+  viewportH: number;
+  dpr: number;
+  scrollHeight: number;
+  container?: FpContainerInfo;
+}
+
+// Full page where the main scroller is an INNER element (dashboards, docs
+// with a fixed sidebar): viewport expansion can't grow constrained CSS
+// layouts, so scroll the container in steps and composite container strips.
+// Captured at the current zoom — zooming re-layouts constrained containers
+// unpredictably, so no density boost here; quality scaling still applies.
+async function captureFullPageContainer(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
+  const tabId = tab.id!;
+  await ensureContent(tabId, tab.url ?? "");
+  await sendToTab(tabId, { type: "CS_HIDE_UI" }).catch(() => undefined);
+  const scrollY = await sendToTab<number>(tabId, { type: "CS_GET_SCROLL" });
+  // Lay sticky into flow + pin fixed to absolute — each renders exactly once.
+  await sendToTab(tabId, { type: "CS_STICKY_REL" }).catch(() => undefined);
+  await sendToTab(tabId, { type: "CS_FULLPAGE_PREP" });
+  try {
+    // Fresh geometry: prep re-pins fixed/sticky, which can shift the rect.
+    const info = await sendToTab<FpInspect>(tabId, { type: "CS_FULLPAGE_INSPECT" });
+    if (info.mode !== "container" || !info.container) {
+      // Ownership flipped under prep — the document path handles it.
+      return captureFullPageScroll(tab, cfg);
+    }
+    const c = info.container;
+    const contH = Math.max(1, Math.round(c.height));
+    const total = Math.max(1, Math.round(c.scrollHeight));
+    if (total * Math.max(1, info.dpr || 1) > 16384) {
+      throw new Error("Page is too tall to stitch on this display. Try Select Region instead.");
+    }
+    const segments: string[] = [];
+    const tops: number[] = [];
+    let y = 0;
+    while (true) {
+      // Clamp the final scroll so the container doesn't re-show the previous
+      // viewport (which would duplicate content at the seam).
+      const yy = Math.max(0, Math.min(y, total - contH));
+      await sendToTab(tabId, { type: "CS_CONTAINER_SCROLL_TO", y: yy });
+      await new Promise((r) => setTimeout(r, 500));
+      // JPEG segments: far smaller messages; stitched + re-encoded after.
+      segments.push(await captureVisibleRateLimited(tab.windowId, true));
+      tops.push(yy);
+      if (yy + contH >= total) break;
+      y += contH;
+      if (segments.length > 40) {
+        throw new Error("Page is too long for full-page capture. Try Select Region instead.");
+      }
+    }
+    const stitched = await sendToTab<{ dataUrl: string; width: number; height: number }>(tabId, {
+      type: "CS_FULLPAGE_STITCH_CONTAINER",
+      segments,
+      tops,
+      rect: { top: c.top, left: c.left, width: c.width, height: c.height },
+      totalH: total,
+      quality: cfg.quality,
+      format: cfg.format,
+      targetWidth: QUALITY_WIDTH[cfg.quality],
+    });
+    await downloadDataUrl(stitched.dataUrl, cfg.format, "", tabId);
+    return { ...stitched, parts: 1 };
+  } finally {
+    await sendToTab(tabId, { type: "CS_FULLPAGE_RESTORE", y: scrollY }).catch(() => undefined);
+    await sendToTab(tabId, { type: "CS_SHOW_UI" }).catch(() => undefined);
   }
 }
 
