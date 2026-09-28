@@ -13,4 +13,4 @@ id = "5bd40ed40e5048d08669ceead635cd18"
 # Comma-separated list of extension origins allowed to call /api/order and
 # /api/license. The chrome-extension:// ID varies per build — add the dev ID
 # from chrome://extensions and later the Web Store ID.
-ALLOWED_ORIGINS = "chrome-extension://bmnookhlomoadfgpooiijdljclapkkke"
+ALLOWED_ORIGINS = "chrome-extension://oeghjggdebmbkofllpacmkkjkkdpebbj,chrome-extension://bmnookhlomoadfgpooiijdljclapkkke"
