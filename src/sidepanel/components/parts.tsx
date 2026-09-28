@@ -3,14 +3,14 @@ import logoUrl from "../../assets/custom-screenshot-logo.png";
 import { cn } from "../../lib/utils";
 import type { CaptureType, Format, Preset, Quality } from "../../types";
 
-export function BrandIcon({ size = 34, pro = false }: { size?: number; pro?: boolean }) {
+export function BrandIcon({ size = 34 }: { size?: number }) {
   return (
     <img
       src={logoUrl}
       width={size}
       height={size}
       alt="Custom Screenshot"
-      className={cn("rounded-xl shadow-sm", pro && "border-2 border-[#D4AF37]")}
+      className="rounded-xl shadow-sm"
       style={{ width: size, height: size }}
     />
   );
@@ -82,6 +82,7 @@ export function QualityButton({
   sub,
   locked,
   trialLeft,
+  pro = false,
   onClick,
 }: {
   active: boolean;
@@ -90,6 +91,8 @@ export function QualityButton({
   locked?: boolean;
   /** Remaining free trial shots today (4K/8K only — omit for free qualities). */
   trialLeft?: number;
+  /** Pro gold theme — active pill goes gold gradient with dark text. */
+  pro?: boolean;
   onClick: () => void;
 }) {
   const isPremium = quality === "4K" || quality === "8K";
@@ -103,7 +106,9 @@ export function QualityButton({
       className={cn(
         "relative flex-1 overflow-hidden rounded-xl border px-2 py-2.5 text-center transition-colors",
         active
-          ? "bg-[#2563EB] text-white dark:bg-[#3B82F6]"
+          ? pro
+            ? "bg-gradient-to-r from-[#A8842C] to-[#D4AF37] dark:from-[#B8912A] dark:to-[#E5C76B] border-[#D4AF37] text-[#1A1405]"
+            : "bg-[#2563EB] text-white dark:bg-[#3B82F6]"
           : "bg-card border-border text-foreground hover:bg-muted",
         locked && !active && "opacity-60",
         isPremium && "border-[#D4AF37] shadow-[0_0_0_1px_#D4AF37]"
@@ -128,7 +133,7 @@ export function QualityButton({
         </span>
       )}
       <div className="text-sm font-semibold">{quality}</div>
-      <div className={cn("text-xs", active ? "text-white/80" : "text-muted-foreground")}>{sub}</div>
+      <div className={cn("text-xs", active ? (pro ? "text-[#1A1405]/70" : "text-white/80") : "text-muted-foreground")}>{sub}</div>
     </button>
   );
 }
@@ -137,11 +142,14 @@ export function FormatButton({
   active,
   format,
   infoTip,
+  pro = false,
   onClick,
 }: {
   active: boolean;
   format: Format;
   infoTip?: { id: string; label: string; text: string };
+  /** Pro gold theme — active pill goes gold gradient with dark text. */
+  pro?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -153,7 +161,9 @@ export function FormatButton({
         className={cn(
           "flex-1 rounded-xl border px-2 py-2.5 text-sm font-semibold transition-colors inline-flex items-center justify-center gap-1.5",
           active
-            ? "bg-[#2563EB] border-[#2563EB] text-white dark:bg-[#3B82F6] dark:border-[#3B82F6]"
+            ? pro
+              ? "bg-gradient-to-r from-[#A8842C] to-[#D4AF37] dark:from-[#B8912A] dark:to-[#E5C76B] border-[#D4AF37] dark:border-[#D4AF37] text-[#1A1405]"
+              : "bg-[#2563EB] border-[#2563EB] text-white dark:bg-[#3B82F6] dark:border-[#3B82F6]"
             : "bg-card border-border text-foreground hover:bg-muted"
         )}
       >
