@@ -206,7 +206,10 @@ export default function App() {
             onClick={() => setProfileOpen(true)}
             aria-label={identity ? `Profile (${identity})` : "Open profile"}
             title={identity ?? "Profile"}
-            className="flex h-9 w-9 items-center justify-center rounded-xl border border-border text-[14px] font-bold text-white bg-gradient-to-r from-[#2563EB] to-[#3B82F6] hover:brightness-110"
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-xl border border-border text-[14px] font-bold text-white bg-gradient-to-r from-[#2563EB] to-[#3B82F6] hover:brightness-110",
+              pro && "border-2 border-[#D4AF37] shadow-[0_0_12px_-2px_rgba(212,175,55,0.6)]"
+            )}
           >
             {identity ? identity.charAt(0).toUpperCase() : <User size={17} />}
           </button>
