@@ -2,7 +2,7 @@ import type { AppSettings, Preset } from "../types";
 
 const DEFAULT_SETTINGS: AppSettings = {
   captureType: "visible",
-  quality: "1080p",
+  quality: "2K",
   format: "png",
   theme: "light",
   clipboard: false,

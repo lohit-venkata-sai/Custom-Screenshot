@@ -1,4 +1,4 @@
-import { Monitor, FileText, Crop, MousePointerClick, Sun, Moon, Info, Lock } from "lucide-react";
+import { Monitor, FileText, Crop, MousePointerClick, Sun, Moon, Info, Lock, Crown } from "lucide-react";
 import logoUrl from "../../assets/custom-screenshot-logo.png";
 import { cn } from "../../lib/utils";
 import type { CaptureType, Format, Preset, Quality } from "../../types";
@@ -81,15 +81,20 @@ export function QualityButton({
   quality,
   sub,
   locked,
+  trialLeft,
   onClick,
 }: {
   active: boolean;
   quality: Quality;
   sub: string;
   locked?: boolean;
+  /** Remaining free trial shots today (4K/8K only — omit for free qualities). */
+  trialLeft?: number;
   onClick: () => void;
 }) {
   const isPremium = quality === "4K" || quality === "8K";
+  const showTrialBadge = isPremium && trialLeft !== undefined;
+  const exhausted = showTrialBadge && (trialLeft as number) <= 0;
   return (
     <button
       onClick={onClick}
@@ -107,6 +112,24 @@ export function QualityButton({
       {locked && (
         <Lock size={11} className="absolute top-1.5 right-1.5 text-[#D4AF37]" aria-hidden />
       )}
+      {showTrialBadge &&
+        (exhausted ? (
+          <Crown
+            size={13}
+            className="absolute top-1.5 left-1.5 text-[#D4AF37]"
+            aria-label="Trial exhausted — go Pro"
+          />
+        ) : (
+          <span
+            className={cn(
+              "absolute top-1 left-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold leading-none",
+              active ? "bg-white text-[#2563EB]" : "bg-[#2563EB] text-white"
+            )}
+            aria-label={`${trialLeft} free trial shots left today`}
+          >
+            {trialLeft}
+          </span>
+        ))}
       <div className="text-sm font-semibold">{quality}</div>
       <div className={cn("text-xs", active ? "text-white/80" : "text-muted-foreground")}>{sub}</div>
     </button>
