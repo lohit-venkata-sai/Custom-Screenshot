@@ -231,6 +231,11 @@ export function ProModal({
               <li>✓ 8K ultra resolution</li>
               <li>✓ One-time purchase, yours forever</li>
             </ul>
+            <p className="mt-2 text-[12px] leading-snug text-muted-foreground">
+              4K &amp; 8K render at up to 3840×2160 and 7680×4320 — output matches your
+              content&apos;s real pixels; small selections come out smaller and are never
+              artificially enlarged.
+            </p>
             <Button
               className="mt-4 w-full h-11 font-bold"
               onClick={pay}
