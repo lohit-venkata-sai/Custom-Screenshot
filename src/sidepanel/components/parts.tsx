@@ -101,7 +101,7 @@ export function QualityButton({
       aria-pressed={active}
       aria-disabled={locked}
       className={cn(
-        "relative flex-1 rounded-xl border px-2 py-2.5 text-center transition-colors",
+        "relative flex-1 overflow-hidden rounded-xl border px-2 py-2.5 text-center transition-colors",
         active
           ? "bg-[#2563EB] text-white dark:bg-[#3B82F6]"
           : "bg-card border-border text-foreground hover:bg-muted",
@@ -112,24 +112,18 @@ export function QualityButton({
       {locked && (
         <Lock size={11} className="absolute top-1.5 right-1.5 text-[#D4AF37]" aria-hidden />
       )}
-      {showTrialBadge &&
-        (exhausted ? (
-          <Crown
-            size={13}
-            className="absolute top-1.5 left-1.5 text-[#D4AF37]"
-            aria-label="Trial exhausted — go Pro"
-          />
-        ) : (
-          <span
-            className={cn(
-              "absolute top-1 left-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold leading-none",
-              active ? "bg-white text-[#2563EB]" : "bg-[#2563EB] text-white"
-            )}
-            aria-label={`${trialLeft} free trial shots left today`}
-          >
-            {trialLeft}
+      {showTrialBadge && (
+        <span
+          className="pointer-events-none absolute left-0 top-0 h-[30px] w-[30px] overflow-hidden"
+          aria-label={
+            exhausted ? "Trial exhausted — go Pro" : `${trialLeft} free trial shots left today`
+          }
+        >
+          <span className="absolute left-[-12px] top-[5px] flex w-[42px] -rotate-45 items-center justify-center bg-[#D4AF37] text-[10px] font-bold leading-[14px] text-white">
+            {exhausted ? <Crown size={10} strokeWidth={3} aria-hidden /> : trialLeft}
           </span>
-        ))}
+        </span>
+      )}
       <div className="text-sm font-semibold">{quality}</div>
       <div className={cn("text-xs", active ? "text-white/80" : "text-muted-foreground")}>{sub}</div>
     </button>
