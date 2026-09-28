@@ -262,13 +262,18 @@ async function captureVisiblePreset(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
   const boost = geom ? boostFor(geom.viewportH, geom.dpr || 1, targetH) : 1;
   let boostErr: unknown = null;
   if (geom && boost > 1) {
+    // Exact density: targetH / cssH in ONE division. The equivalent
+    // dpr*boost round-trips through two divisions and can drift ~1ulp
+    // (e.g. 2.6999999999999997 vs 2.7), costing a pixel off the target.
+    // Capped branch (boost 4) is identical: dpr*4 is exact in binary.
+    const dsfExact = Math.min((geom.dpr || 1) * 4, targetH / Math.max(1, geom.viewportH));
     try {
       const res = await withOverlayHidden(tab.id, async () => {
         const shot = await emuCaptureViewport(
           tab.id!,
           geom.viewportW,
           geom.viewportH,
-          (geom.dpr || 1) * boost
+          dsfExact
         );
         const bmp = await createImageBitmap(u8ToBlob(shot.bytes, shot.mime));
         try {
@@ -280,7 +285,7 @@ async function captureVisiblePreset(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
       await downloadDataUrl(res.dataUrl, cfg.format, "", tab.id);
       const dpr = geom.dpr || 1;
       const rawBoost = targetH / (Math.max(1, geom.viewportH) * Math.max(0.5, dpr));
-      pushDiag(`[${diagTs()}] visible ${cfg.quality} ${fmtBoost(dpr * boost, dpr * rawBoost)} ${res.width}×${res.height} ${Date.now() - t0}ms`);
+      pushDiag(`[${diagTs()}] visible ${cfg.quality} ${fmtBoost(dsfExact, dpr * rawBoost)} ${res.width}×${res.height} ${Date.now() - t0}ms`);
       return res;
     } catch (e) {
       boostErr = e; // fall through to classic path, warn below
@@ -314,6 +319,15 @@ async function captureFullPageEmu(
 ) {
   const tabId = tab.id!;
   await sendToTab(tabId, { type: "CS_HIDE_UI" }).catch(() => undefined);
+  // Augustat caveat: full-size capture at zoom > 100% can cut off the right
+  // side (content metrics are measured in zoomed CSS px). Normalize to 100%
+  // for the capture and restore after — same pattern as the scroll fallback.
+  const prevZoom = await chrome.tabs.getZoom(tabId).catch(() => 1);
+  const zoomReset = Number.isFinite(prevZoom) && Math.abs((prevZoom as number) - 1) > 1e-9;
+  if (zoomReset) {
+    await chrome.tabs.setZoom(tabId, 1).catch(() => undefined);
+    await new Promise((r) => setTimeout(r, 450));
+  }
   // Wake lazy-loaded content with a quick scroll-through (no captures, no quota).
   const scrollY = await sendToTab<number>(tabId, { type: "CS_GET_SCROLL" }).catch(() => 0);
   if (geom && geom.scrollHeight > geom.viewportH) {
@@ -323,7 +337,16 @@ async function captureFullPageEmu(
     }
   }
   await sendToTab(tabId, { type: "CS_STICKY_REL" }).catch(() => undefined);
-  await dbgAttach(tabId);
+  try {
+    await dbgAttach(tabId);
+  } catch (e) {
+    // Attach failed (e.g. DevTools open): undo the zoom reset so the
+    // scroll-stitch fallback sees the user's original zoom, then rethrow.
+    if (zoomReset) {
+      await chrome.tabs.setZoom(tabId, prevZoom as number).catch(() => undefined);
+    }
+    throw e;
+  }
   try {
     const lm = (await dbgSend(tabId, "Page.getLayoutMetrics", {})) as {
       contentSize: { x: number; y: number; width: number; height: number };
@@ -357,6 +380,10 @@ async function captureFullPageEmu(
   } finally {
     await dbgSend(tabId, "Emulation.clearDeviceMetricsOverride", {}).catch(() => undefined);
     await dbgDetach(tabId);
+    if (zoomReset) {
+      await chrome.tabs.setZoom(tabId, prevZoom as number).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 300));
+    }
     await sendToTab(tabId, { type: "CS_FULLPAGE_RESTORE", y: scrollY }).catch(() => undefined);
     await sendToTab(tabId, { type: "CS_SHOW_UI" }).catch(() => undefined);
   }
@@ -866,7 +893,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const boost = boostFor(geom.viewportH, dpr, targetH);
         if (boost <= 1) throw new Error("screen suffices");
         dsfFit = dpr * (targetH / (Math.max(1, geom.viewportH) * Math.max(0.5, dpr)));
-        dsf = dpr * boost;
+        // Same single-division exactness as the visible-preset path above.
+        dsf = Math.min(dpr * 4, targetH / Math.max(1, geom.viewportH));
       }
       const res = await withOverlayHidden(tab.id, async () => {
         const shot = await emuCaptureViewport(
