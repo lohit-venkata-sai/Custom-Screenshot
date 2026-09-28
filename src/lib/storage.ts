@@ -171,3 +171,24 @@ export async function consumeTrial(q: TrialQuality, email = ""): Promise<boolean
   });
   return true;
 }
+
+// Reconcile rule (server-side trial metering, offline-safe):
+// effective used = max(local used, server used). The background gate applies
+// this after every successful server read: local catches up when another
+// device consumed server-side, and offline shots the server never saw are
+// NEVER replayed as extra POSTs (no double-charge — the server simply stays
+// behind by the offline count, a fail-open grace accepted by design).
+export async function reconcileTrial(
+  email: string,
+  serverUsed4k: number,
+  serverUsed8k: number
+): Promise<void> {
+  const t = await readTrial(email);
+  const s4 = Number.isFinite(serverUsed4k) ? Math.max(0, Math.floor(serverUsed4k)) : 0;
+  const s8 = Number.isFinite(serverUsed8k) ? Math.max(0, Math.floor(serverUsed8k)) : 0;
+  await writeTrial({
+    ...t,
+    used4k: Math.max(t.used4k, Math.min(TRIAL_DAILY, s4)),
+    used8k: Math.max(t.used8k, Math.min(TRIAL_DAILY, s8)),
+  });
+}

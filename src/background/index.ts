@@ -1,8 +1,8 @@
 import type { CaptureConfig } from "../types";
 import { QUALITY_HEIGHT, QUALITY_WIDTH } from "../types";
 import { getActivePreset, getSettings } from "../lib/storage";
-import { trialRemaining, consumeTrial, TESTING_UNLIMITED_TRIALS } from "../lib/storage";
-import { isPro, getTrialIdentity } from "../lib/pro";
+import { trialRemaining, consumeTrial, reconcileTrial, TESTING_UNLIMITED_TRIALS } from "../lib/storage";
+import { isPro, getTrialIdentity, fetchTrial, consumeServerTrial } from "../lib/pro";
 import { formatTimestamp, sanitizeFilename } from "../lib/utils";
 import { extFor } from "../lib/capture";
 import { pushDiag, getDiagLogs, diagTs, fmtBoost, diagRawReason, diagPickReason, fmtRect } from "../lib/diag";
@@ -820,6 +820,36 @@ async function emuCaptureViewport(
   }
 }
 
+// Server-authoritative trial gate with offline fallback (never throws toward
+// blocking: a null server read means offline/unconfigured → local decides).
+// On a successful server read, local counters reconcile up to
+// max(local, server) so a second device's consumption is honored locally.
+async function trialGateRemaining(q: "4K" | "8K", email: string): Promise<number> {
+  try {
+    const t = await fetchTrial(email);
+    if (t) {
+      const daily = Number.isFinite(t.daily) && t.daily > 0 ? t.daily : 2;
+      await reconcileTrial(email, daily - t.remaining4k, daily - t.remaining8k);
+      return q === "4K" ? t.remaining4k : t.remaining8k;
+    }
+  } catch {
+    /* fall through to local */
+  }
+  return trialRemaining(q, email);
+}
+
+// Post-success consume (same points where local consumeTrial ran): local
+// always (offline record) + best-effort 1× POST /api/consume (ignored when
+// offline — no replay later, so no double-charge; see reconcileTrial).
+async function consumeTrialBoth(q: "4K" | "8K", email: string): Promise<void> {
+  await consumeTrial(q, email);
+  try {
+    await consumeServerTrial(email, q);
+  } catch {
+    /* offline — local already recorded */
+  }
+}
+
 async function doCapture(cfg?: CaptureConfig) {
   const tab = await activeTab();
   if (!tab || tab.id == null) throw new Error("No active tab");
@@ -828,6 +858,11 @@ async function doCapture(cfg?: CaptureConfig) {
   if (config.format === "pdf" && config.captureType !== "fullPage") config.format = "png";
   // Trial gate (PRO bypasses): 4K/8K need a signed-in identity first (so a
   // cache clear alone can't mint fresh trials), then 2 free shots/day each.
+  // Server-authoritative when the Worker is configured AND reachable: 1× GET
+  // /api/trial pre-capture decides; offline/Worker-down falls back to local
+  // counters (fail-open UX, never blocks on network). Free qualities
+  // (720p/1080p/2K) make zero trial calls. See reconcileTrial for the
+  // max(local, server) offline rule.
   // TESTING BYPASS: when TESTING_UNLIMITED_TRIALS is true, 4K/8K skip the
   // identity requirement, the exhaustion check, and all consumption below.
   const pro = await isPro();
@@ -837,7 +872,7 @@ async function doCapture(cfg?: CaptureConfig) {
     const identity = await getTrialIdentity();
     if (!identity) throw new Error("LOGIN_REQUIRED");
     trialEmail = identity;
-    if ((await trialRemaining(trialQ, trialEmail)) <= 0) {
+    if ((await trialGateRemaining(trialQ, trialEmail)) <= 0) {
       throw new Error(`TRIAL_EXHAUSTED:${trialQ}`);
     }
   }
@@ -852,7 +887,7 @@ async function doCapture(cfg?: CaptureConfig) {
       res = await captureVisibleSW(tab, config);
     }
     if (!pro && !TESTING_UNLIMITED_TRIALS && (config.quality === "4K" || config.quality === "8K")) {
-      await consumeTrial(config.quality, trialEmail);
+      await consumeTrialBoth(config.quality, trialEmail);
     }
     const clip = await copyReport(tab.id, res.dataUrl, config.format);
     await feedback(tab.id, "Screenshot captured", `${res.width} × ${res.height} • ${config.format.toUpperCase()}${clip}`);
@@ -861,7 +896,7 @@ async function doCapture(cfg?: CaptureConfig) {
   if (config.captureType === "fullPage") {
     const res = await captureFullPageLoop(tab, config);
     if (!pro && !TESTING_UNLIMITED_TRIALS && (config.quality === "4K" || config.quality === "8K")) {
-      await consumeTrial(config.quality, trialEmail);
+      await consumeTrialBoth(config.quality, trialEmail);
     }
     const summary = (res.parts ?? 1) > 1
       ? `${res.parts} parts • ${res.width} × ${res.height} • ${config.format.toUpperCase()}`
@@ -1023,7 +1058,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       );
       const pending = sender.tab?.id != null ? pendingTrial.get(sender.tab.id) : undefined;
       if (sender.tab?.id != null) pendingTrial.delete(sender.tab.id);
-      if (pending && !TESTING_UNLIMITED_TRIALS) await consumeTrial(pending.q, pending.email);
+      if (pending && !TESTING_UNLIMITED_TRIALS) await consumeTrialBoth(pending.q, pending.email);
       await downloadDataUrl(msg.dataUrl, msg.format, "", sender.tab?.id);
       const clip = await copyReport(sender.tab?.id, msg.dataUrl, msg.format);
       if (sender.tab?.id != null) {
