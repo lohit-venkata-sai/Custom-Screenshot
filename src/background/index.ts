@@ -2,9 +2,7 @@ import type { CaptureConfig } from "../types";
 import { QUALITY_HEIGHT, QUALITY_WIDTH } from "../types";
 import { getActivePreset, getSettings } from "../lib/storage";
 import { trialRemaining, consumeTrial } from "../lib/storage";
-import { isPro, getTrialIdentity, startProBackground } from "../lib/pro";
-
-startProBackground();
+import { isPro, getTrialIdentity } from "../lib/pro";
 import { formatTimestamp, sanitizeFilename } from "../lib/utils";
 import { extFor } from "../lib/capture";
 import { jpegPagesToPdfDataUrl, type PdfPageImage } from "../lib/pdf";
@@ -184,8 +182,9 @@ async function copyToClipboard(dataUrl: string, tabId?: number | null): Promise<
         await new Promise((r) => setTimeout(r, 350));
       }
     }
-    // Offscreen failed: fall back to a page-context write (clipboardWrite
-    // permission), which succeeds when the tab is focused.
+    // Offscreen failed: fall back to a page-context write (no extra
+    // permission needed — clipboard.write first, execCommand fallback),
+    // which succeeds when the tab is focused.
     if (tabId != null) {
       try {
         const res = await sendToTab<{ ok?: boolean; error?: string }>(tabId, {

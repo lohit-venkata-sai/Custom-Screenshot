@@ -18,7 +18,7 @@ import {
   TRIAL_DAILY_4K,
   updatePreset,
 } from "../lib/storage";
-import { isPro, fetchProUser } from "../lib/pro";
+import { isPro, getTrialIdentity } from "../lib/pro";
 import { uid } from "../lib/utils";
 import { APP_VERSION } from "../lib/version";
 import type { CaptureType, Format, Preset, Quality } from "../types";
@@ -55,11 +55,9 @@ export default function App() {
       setFormat(s.settings.format);
       setTheme(s.settings.theme);
       applyTheme(s.settings.theme);
-      // Clipboard is parked for rework: force off (stale enabled flags).
-      setClipboard(false);
-      if (s.settings.clipboard) {
-        saveSettings({ clipboard: false }).catch(() => undefined);
-      }
+      // Clipboard defaults OFF (storage.ts) so existing users are unaffected;
+      // respect whatever the user last chose.
+      setClipboard(s.settings.clipboard === true);
     });
     const loadTrials = (email: string | null) => {
       const em = email ?? "";
@@ -68,11 +66,10 @@ export default function App() {
     };
     loadTrials(null);
     isPro().then(setPro).catch(() => undefined);
-    fetchProUser()
-      .then((u) => {
-        setIdentity(u.email);
-        if (u.paid) setPro(true);
-        if (u.email) loadTrials(u.email);
+    getTrialIdentity()
+      .then((email) => {
+        setIdentity(email);
+        if (email) loadTrials(email);
       })
       .catch(() => undefined);
     // Reopened after a gated 4K/8K attempt: go straight to sign-in or upsell.
