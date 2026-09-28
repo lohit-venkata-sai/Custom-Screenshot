@@ -681,7 +681,7 @@ async function doCapture(cfg?: CaptureConfig) {
       await consumeTrial(config.quality, trialEmail);
     }
     const summary = (res.parts ?? 1) > 1
-      ? `${res.parts} parts • ${config.format.toUpperCase()}`
+      ? `${res.parts} parts • ${res.width} × ${res.height} • ${config.format.toUpperCase()}`
       : `${res.width} × ${res.height} • ${config.format.toUpperCase()}`;
     const clip = await copyReport(tab.id, res.dataUrl, config.format);
     await sendToTab(tab.id, {
@@ -801,10 +801,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       await downloadDataUrl(msg.dataUrl, msg.format, "", sender.tab?.id);
       const clip = await copyReport(sender.tab?.id, msg.dataUrl, msg.format);
       if (sender.tab?.id != null) {
+        const dims =
+          Number.isFinite(msg.width) && Number.isFinite(msg.height)
+            ? `${msg.width} × ${msg.height} • `
+            : "";
         await sendToTab(sender.tab.id, {
           type: "CS_TOAST",
           title: "Screenshot captured",
-          body: `${msg.width} × ${msg.height} • ${String(msg.format).toUpperCase()}${clip}`,
+          body: `${dims}${String(msg.format).toUpperCase()}${clip}`,
         }).catch(() => undefined);
         await maybeReopenPanel(sender.tab.id);
       }
