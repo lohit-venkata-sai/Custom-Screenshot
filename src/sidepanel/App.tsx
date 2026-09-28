@@ -30,7 +30,7 @@ const QUALITIES: Quality[] = ["720p", "1080p", "2K", "4K", "8K"];
 export default function App() {
   const [tab, setTab] = useState<"capture" | "presets">("capture");
   const [captureType, setCaptureType] = useState<CaptureType>("visible");
-  const [quality, setQuality] = useState<Quality>("1080p");
+  const [quality, setQuality] = useState<Quality>("2K");
   const [format, setFormat] = useState<Format>("png");
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [presets, setPresets] = useState<Preset[]>([]);
@@ -259,6 +259,21 @@ export default function App() {
                     quality={q}
                     sub={QUALITY_DIMS[q]}
                     locked={lockedQualities.includes(q)}
+                    trialLeft={
+                      q === "4K"
+                        ? pro
+                          ? undefined
+                          : identity
+                            ? trialLeft
+                            : TRIAL_DAILY_4K
+                        : q === "8K"
+                          ? pro
+                            ? undefined
+                            : identity
+                              ? trialLeft8k
+                              : TRIAL_DAILY_4K
+                          : undefined
+                    }
                     onClick={() => {
                       if (lockedQualities.includes(q)) {
                         setProOpen(identity ? "upsell" : "login");
@@ -412,6 +427,9 @@ export default function App() {
           onSignOut={() => {
             setIdentity(null);
             setPro(false);
+            // Signed out = no tracked usage: badges fall back to the full daily count.
+            setTrialLeft(TRIAL_DAILY_4K);
+            setTrialLeft8k(TRIAL_DAILY_4K);
             setProfileOpen(false);
             chrome.storage.local.remove(["trialEmail", "proPaid"]).catch(() => undefined);
           }}
