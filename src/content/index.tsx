@@ -312,13 +312,6 @@ function startPick(mode: "region" | "element") {
   else startElement(overlay);
 }
 
-function finishPickOverlay(overlay: HTMLElement) {
-  overlay.remove();
-  document.removeEventListener("keydown", escHandler, true);
-  document.body.style.cursor = "";
-  removePickCursor();
-}
-
 function startRegion(overlay: HTMLElement) {
   let startX = 0;
   let startY = 0;
