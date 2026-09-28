@@ -111,6 +111,7 @@ export function ProfileDialog({
             <span className="block text-[12px] text-muted-foreground">
               {clipboard ? "Screenshots also copy to clipboard" : "Also copy screenshots to clipboard"}
             </span>
+            <span className="block text-[12px] text-muted-foreground">Copies to clipboard as PNG</span>
           </span>
           <button
             role="switch"
