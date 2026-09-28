@@ -5,6 +5,7 @@ import { Button } from "./ui";
 import { TRIAL_DAILY_4K } from "../../lib/storage";
 import {
   EXTPAY_CONFIGURED,
+  PAYMENTS_LIVE,
   fetchProUser,
   openLoginPage,
   openPaymentPage,
@@ -97,7 +98,8 @@ export function ProModal({
   };
 
   const pay = () => {
-    if (!EXTPAY_CONFIGURED) {
+    // Free-scope freeze: checkout stays dormant until plans go live.
+    if (!EXTPAY_CONFIGURED || !PAYMENTS_LIVE) {
       toast.message("Checkout is coming soon");
       return;
     }
@@ -105,7 +107,7 @@ export function ProModal({
       openPaymentPage();
       toast.message("Complete payment in the opened tab, then hit Refresh below");
     } catch {
-      toast.error("Could not open checkout");
+      toast.message("Checkout is coming soon");
     }
   };
 
