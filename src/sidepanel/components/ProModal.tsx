@@ -246,7 +246,7 @@ export function ProModal({
                 : buying
                   ? "Opening checkout…"
                   : PAYMENTS_LIVE
-                    ? "Get Pixel Pro — $9 one-time"
+                    ? "Get Pixel Pro — ₹350 one-time"
                     : "Get Pro — Coming soon"}
             </Button>
             <div className="mt-2 flex items-center justify-center">
