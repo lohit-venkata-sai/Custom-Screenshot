@@ -5,6 +5,7 @@ import { trialRemaining, consumeTrial, TESTING_UNLIMITED_TRIALS } from "../lib/s
 import { isPro, getTrialIdentity } from "../lib/pro";
 import { formatTimestamp, sanitizeFilename } from "../lib/utils";
 import { extFor } from "../lib/capture";
+import { pushDiag, getDiagLogs, diagTs, fmtBoost, diagRawReason, diagPickReason, fmtRect } from "../lib/diag";
 import { jpegPagesToPdfDataUrl, type PdfPageImage } from "../lib/pdf";
 
 async function activeTab(): Promise<chrome.tabs.Tab | null> {
@@ -251,6 +252,7 @@ async function withOverlayHidden<T>(tabId: number, fn: () => Promise<T>): Promis
 
 async function captureVisiblePreset(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
   if (tab.id == null) throw new Error("No active tab");
+  const t0 = Date.now();
   await ensureContent(tab.id, tab.url ?? "");
   // Augustat path: re-render the same viewport at higher density when the
   // screen alone can't reach the requested quality. Falls back to raw,
@@ -260,13 +262,18 @@ async function captureVisiblePreset(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
   const boost = geom ? boostFor(geom.viewportH, geom.dpr || 1, targetH) : 1;
   let boostErr: unknown = null;
   if (geom && boost > 1) {
+    // Exact density: targetH / cssH in ONE division. The equivalent
+    // dpr*boost round-trips through two divisions and can drift ~1ulp
+    // (e.g. 2.6999999999999997 vs 2.7), costing a pixel off the target.
+    // Capped branch (boost 4) is identical: dpr*4 is exact in binary.
+    const dsfExact = Math.min((geom.dpr || 1) * 4, targetH / Math.max(1, geom.viewportH));
     try {
       const res = await withOverlayHidden(tab.id, async () => {
         const shot = await emuCaptureViewport(
           tab.id!,
           geom.viewportW,
           geom.viewportH,
-          (geom.dpr || 1) * boost
+          dsfExact
         );
         const bmp = await createImageBitmap(u8ToBlob(shot.bytes, shot.mime));
         try {
@@ -276,6 +283,9 @@ async function captureVisiblePreset(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
         }
       });
       await downloadDataUrl(res.dataUrl, cfg.format, "", tab.id);
+      const dpr = geom.dpr || 1;
+      const rawBoost = targetH / (Math.max(1, geom.viewportH) * Math.max(0.5, dpr));
+      pushDiag(`[${diagTs()}] visible ${cfg.quality} ${fmtBoost(dsfExact, dpr * rawBoost)} ${res.width}×${res.height} ${Date.now() - t0}ms`);
       return res;
     } catch (e) {
       boostErr = e; // fall through to classic path, warn below
@@ -291,6 +301,8 @@ async function captureVisiblePreset(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
     });
   });
   await downloadDataUrl(res.dataUrl, cfg.format, "", tab.id);
+  const reason = !geom ? "no-geometry" : boost <= 1 ? "screen-suffices" : diagRawReason(boostErr);
+  pushDiag(`[${diagTs()}] visible ${cfg.quality} RAW(${reason}) ${res.width}×${res.height} ${Date.now() - t0}ms`);
   if (boostErr && !isNoBenefit(boostErr) && (cfg.quality === "4K" || cfg.quality === "8K")) {
     await feedback(tab.id, "High-res boost unavailable", boostFallbackBody(boostErr), true);
   }
@@ -307,16 +319,28 @@ async function captureFullPageEmu(
 ) {
   const tabId = tab.id!;
   await sendToTab(tabId, { type: "CS_HIDE_UI" }).catch(() => undefined);
-  // Wake lazy-loaded content with a quick scroll-through (no captures, no quota).
-  const scrollY = await sendToTab<number>(tabId, { type: "CS_GET_SCROLL" }).catch(() => 0);
-  if (geom && geom.scrollHeight > geom.viewportH) {
-    for (let y = 0; y < geom.scrollHeight; y += Math.max(1, geom.viewportH)) {
-      await sendToTab(tabId, { type: "CS_SCROLL_TO", y }).catch(() => undefined);
-      await new Promise((r) => setTimeout(r, 120));
-    }
+  // Augustat caveat: full-size capture at zoom > 100% can cut off the right
+  // side (content metrics are measured in zoomed CSS px). Normalize to 100%
+  // for the capture and restore after — same pattern as the scroll fallback.
+  const prevZoom = await chrome.tabs.getZoom(tabId).catch(() => 1);
+  const zoomReset = Number.isFinite(prevZoom) && Math.abs((prevZoom as number) - 1) > 1e-9;
+  if (zoomReset) {
+    await chrome.tabs.setZoom(tabId, 1).catch(() => undefined);
+    await new Promise((r) => setTimeout(r, 450));
   }
+  // Lazy content was woken by the loop-level CS_LAZY_PASS before measuring.
+  const scrollY = await sendToTab<number>(tabId, { type: "CS_GET_SCROLL" }).catch(() => 0);
   await sendToTab(tabId, { type: "CS_STICKY_REL" }).catch(() => undefined);
-  await dbgAttach(tabId);
+  try {
+    await dbgAttach(tabId);
+  } catch (e) {
+    // Attach failed (e.g. DevTools open): undo the zoom reset so the
+    // scroll-stitch fallback sees the user's original zoom, then rethrow.
+    if (zoomReset) {
+      await chrome.tabs.setZoom(tabId, prevZoom as number).catch(() => undefined);
+    }
+    throw e;
+  }
   try {
     const lm = (await dbgSend(tabId, "Page.getLayoutMetrics", {})) as {
       contentSize: { x: number; y: number; width: number; height: number };
@@ -326,7 +350,8 @@ async function captureFullPageEmu(
     if (W <= 0 || H <= 0) throw new Error("Could not measure the page.");
     const dpr = geom?.dpr || 1;
     const zoomQ = cfg.quality === "4K" || cfg.quality === "8K" ? 2 : cfg.quality === "2K" ? 1.5 : 1;
-    const dsf = Math.max(0.25, Math.min(dpr * zoomQ, 16000 / H, 16000 / W));
+    const dsfFit = dpr * zoomQ;
+    const dsf = Math.max(0.25, Math.min(dsfFit, 16000 / H, 16000 / W));
     await dbgSend(tabId, "Emulation.setDeviceMetricsOverride", {
       width: W,
       height: H,
@@ -342,13 +367,17 @@ async function captureFullPageEmu(
     try {
       const final = await finalizeBitmapSW(bmp, cfg, "width");
       await downloadDataUrl(final.dataUrl, cfg.format, "", tabId);
-      return { ...final, parts: 1 };
+      return { ...final, parts: 1, dsf, dsfFit };
     } finally {
       bmp.close();
     }
   } finally {
     await dbgSend(tabId, "Emulation.clearDeviceMetricsOverride", {}).catch(() => undefined);
     await dbgDetach(tabId);
+    if (zoomReset) {
+      await chrome.tabs.setZoom(tabId, prevZoom as number).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 300));
+    }
     await sendToTab(tabId, { type: "CS_FULLPAGE_RESTORE", y: scrollY }).catch(() => undefined);
     await sendToTab(tabId, { type: "CS_SHOW_UI" }).catch(() => undefined);
   }
@@ -356,15 +385,33 @@ async function captureFullPageEmu(
 
 async function captureFullPageLoop(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
   const tabId = tab.id!;
+  const t0 = Date.now();
   await ensureContent(tabId, tab.url ?? "");
+  // Wake lazy-loaded content first (no captures, no quota): both the emu and
+  // scroll paths then measure/capture fully-loaded content. No-op on short pages.
+  await sendToTab(tabId, { type: "CS_LAZY_PASS" }).catch(() => undefined);
   const geom = await pageGeom(tabId);
+  // Dashboards whose main scroller is an inner element can't be captured by
+  // viewport expansion (CSS constraints won't grow) — stitch the container.
+  const inspect = await sendToTab<FpInspect>(tabId, { type: "CS_FULLPAGE_INSPECT" }).catch(() => null);
+  if (inspect?.mode === "container" && inspect.container) {
+    const res = await captureFullPageContainer(tab, cfg);
+    pushDiag(`[${diagTs()}] fullPage ${cfg.quality} CONTAINER ${res.width}×${res.height} ${Date.now() - t0}ms`);
+    return res;
+  }
   try {
-    return await captureFullPageEmu(tab, cfg, geom);
+    const res = await captureFullPageEmu(tab, cfg, geom);
+    pushDiag(`[${diagTs()}] fullPage ${cfg.quality} ${fmtBoost(res.dsf, res.dsfFit)} ${res.width}×${res.height} ${Date.now() - t0}ms`);
+    return res;
   } catch (e) {
     if (e instanceof Error && /DBG_ATTACHED_ELSEWHERE/.test(e.message)) {
+      pushDiag(`[${diagTs()}] fullPage ${cfg.quality} RAW(devtools-blocked) 0×0 ${Date.now() - t0}ms`);
       throw new Error("Close DevTools (F12) and try again — only one debugger can run at a time.");
     }
-    return captureFullPageScroll(tab, cfg);
+    const fbErr = e;
+    const res = await captureFullPageScroll(tab, cfg);
+    pushDiag(`[${diagTs()}] fullPage ${cfg.quality} RAW(${diagRawReason(fbErr)}) ${res.width}×${res.height} ${Date.now() - t0}ms`);
+    return res;
   }
 }
 
@@ -447,6 +494,86 @@ async function captureFullPageScroll(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
   }
 }
 
+interface FpContainerInfo {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+  scrollHeight: number;
+  scrollTop: number;
+}
+
+interface FpInspect {
+  mode: "document" | "container";
+  viewportW: number;
+  viewportH: number;
+  dpr: number;
+  scrollHeight: number;
+  container?: FpContainerInfo;
+}
+
+// Full page where the main scroller is an INNER element (dashboards, docs
+// with a fixed sidebar): viewport expansion can't grow constrained CSS
+// layouts, so scroll the container in steps and composite container strips.
+// Captured at the current zoom — zooming re-layouts constrained containers
+// unpredictably, so no density boost here; quality scaling still applies.
+async function captureFullPageContainer(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
+  const tabId = tab.id!;
+  await ensureContent(tabId, tab.url ?? "");
+  await sendToTab(tabId, { type: "CS_HIDE_UI" }).catch(() => undefined);
+  const scrollY = await sendToTab<number>(tabId, { type: "CS_GET_SCROLL" });
+  // Lay sticky into flow + pin fixed to absolute — each renders exactly once.
+  await sendToTab(tabId, { type: "CS_STICKY_REL" }).catch(() => undefined);
+  await sendToTab(tabId, { type: "CS_FULLPAGE_PREP" });
+  try {
+    // Fresh geometry: prep re-pins fixed/sticky, which can shift the rect.
+    const info = await sendToTab<FpInspect>(tabId, { type: "CS_FULLPAGE_INSPECT" });
+    if (info.mode !== "container" || !info.container) {
+      // Ownership flipped under prep — the document path handles it.
+      return captureFullPageScroll(tab, cfg);
+    }
+    const c = info.container;
+    const contH = Math.max(1, Math.round(c.height));
+    const total = Math.max(1, Math.round(c.scrollHeight));
+    if (total * Math.max(1, info.dpr || 1) > 16384) {
+      throw new Error("Page is too tall to stitch on this display. Try Select Region instead.");
+    }
+    const segments: string[] = [];
+    const tops: number[] = [];
+    let y = 0;
+    while (true) {
+      // Clamp the final scroll so the container doesn't re-show the previous
+      // viewport (which would duplicate content at the seam).
+      const yy = Math.max(0, Math.min(y, total - contH));
+      await sendToTab(tabId, { type: "CS_CONTAINER_SCROLL_TO", y: yy });
+      await new Promise((r) => setTimeout(r, 500));
+      // JPEG segments: far smaller messages; stitched + re-encoded after.
+      segments.push(await captureVisibleRateLimited(tab.windowId, true));
+      tops.push(yy);
+      if (yy + contH >= total) break;
+      y += contH;
+      if (segments.length > 40) {
+        throw new Error("Page is too long for full-page capture. Try Select Region instead.");
+      }
+    }
+    const stitched = await sendToTab<{ dataUrl: string; width: number; height: number }>(tabId, {
+      type: "CS_FULLPAGE_STITCH_CONTAINER",
+      segments,
+      tops,
+      rect: { top: c.top, left: c.left, width: c.width, height: c.height },
+      totalH: total,
+      quality: cfg.quality,
+      format: cfg.format,
+      targetWidth: QUALITY_WIDTH[cfg.quality],
+    });
+    await downloadDataUrl(stitched.dataUrl, cfg.format, "", tabId);
+    return { ...stitched, parts: 1 };
+  } finally {
+    await sendToTab(tabId, { type: "CS_FULLPAGE_RESTORE", y: scrollY }).catch(() => undefined);
+    await sendToTab(tabId, { type: "CS_SHOW_UI" }).catch(() => undefined);
+  }
+}
+
 async function resolveConfig(): Promise<CaptureConfig> {
   const active = await getActivePreset();
   if (active) return { captureType: active.captureType, quality: active.quality, format: active.format };
@@ -475,11 +602,13 @@ function blobToDataUrl(blob: Blob): Promise<string> {
  * Resizes with OffscreenCanvas; never upscales.
  */
 async function captureVisibleSW(tab: chrome.tabs.Tab, cfg: CaptureConfig) {
+  const t0 = Date.now();
   const raw = await captureVisibleRateLimited(tab.windowId, false);
   const bmp = await createImageBitmap(await (await fetch(raw)).blob());
   try {
     const final = await finalizeBitmapSW(bmp, cfg);
     await downloadDataUrl(final.dataUrl, cfg.format, "", tab.id);
+    pushDiag(`[${diagTs()}] visible ${cfg.quality} RAW(restricted-page) ${final.width}×${final.height} ${Date.now() - t0}ms`);
     return final;
   } finally {
     bmp.close();
@@ -830,6 +959,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!geom) throw new Error("no geometry");
       const dpr = geom.dpr || 1;
       let dsf: number;
+      let dsfFit: number;
       const r = msg.rect as
         | { x?: number; y?: number; width?: number; height?: number }
         | undefined;
@@ -840,13 +970,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         (r.width as number) > 0 &&
         (r.height as number) > 0
       ) {
+        dsfFit = Math.min(FIT_W / (r.width as number), FIT_H / (r.height as number));
         dsf = fitDsfForRect(r.width as number, r.height as number, geom.viewportW, geom.viewportH);
         if (!(dsf > dpr)) throw new Error("screen suffices");
       } else {
         const targetH = QUALITY_HEIGHT[(msg.quality as CaptureConfig["quality"]) ?? "1080p"];
         const boost = boostFor(geom.viewportH, dpr, targetH);
         if (boost <= 1) throw new Error("screen suffices");
-        dsf = dpr * boost;
+        dsfFit = dpr * (targetH / (Math.max(1, geom.viewportH) * Math.max(0.5, dpr)));
+        // Same single-division exactness as the visible-preset path above.
+        dsf = Math.min(dpr * 4, targetH / Math.max(1, geom.viewportH));
       }
       const res = await withOverlayHidden(tab.id, async () => {
         const shot = await emuCaptureViewport(
@@ -857,12 +990,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         );
         return blobToDataUrl(u8ToBlob(shot.bytes, shot.mime));
       });
-      sendResponse({ ok: true, raw: res });
+      sendResponse({ ok: true, raw: res, dsf, dsfFit });
     } else if (msg.type === "CS_DOWNLOAD") {
       await downloadDataUrl(msg.dataUrl, msg.format, "", sender.tab?.id);
       sendResponse({ ok: true });
     } else if (msg.type === "CS_FINISH_PICK") {
-      // content script selected rect/element screenshot already processed; just download + toast
+      // content script selected rect/element screenshot already processed; just download + toast.
+      // Extended payload (captureType/quality/rect/boostDsf/boostDsfFit/failReason/rawReason/durationMs)
+      // feeds the test-mode diagnostics log — one line per capture.
+      const pickType = msg.captureType === "element" ? "element" : "region";
+      const pickQuality = typeof msg.quality === "string" ? msg.quality : "?";
+      const durMs = Number.isFinite(msg.durationMs) ? Math.max(0, Math.round(msg.durationMs)) : 0;
+      const dimsKnown = Number.isFinite(msg.width) && Number.isFinite(msg.height);
+      const path = msg.boostDsf != null && Number.isFinite(msg.boostDsf)
+        ? fmtBoost(Number(msg.boostDsf), Number.isFinite(msg.boostDsfFit) ? Number(msg.boostDsfFit) : Number(msg.boostDsf))
+        : `RAW(${diagPickReason(msg.failReason ?? null, msg.rawReason ?? null)})`;
+      pushDiag(
+        `[${diagTs()}] ${pickType} ${pickQuality} ${path}${fmtRect(msg.rect)} ${dimsKnown ? `${msg.width}×${msg.height}` : "?×?"} ${durMs}ms`
+      );
       const pending = sender.tab?.id != null ? pendingTrial.get(sender.tab.id) : undefined;
       if (sender.tab?.id != null) pendingTrial.delete(sender.tab.id);
       if (pending && !TESTING_UNLIMITED_TRIALS) await consumeTrial(pending.q, pending.email);
@@ -886,6 +1031,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await maybeReopenPanel(sender.tab.id);
       }
       sendResponse({ ok: true });
+    } else if (msg.type === "CS_GET_DIAG_LOGS") {
+      // Test-mode diagnostics: newest-first lines from the in-memory ring.
+      sendResponse({ ok: true, logs: getDiagLogs() });
     } else if (msg.type === "CS_OPEN_PANEL") {
       const tab = sender.tab ?? (await activeTab());
       await openPanelForTab(tab?.id);
