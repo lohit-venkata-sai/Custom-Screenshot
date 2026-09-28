@@ -21,7 +21,7 @@ const PLANS: Record<
   { amount: number; currency: string; name: string; description: string }
 > = {
   pro: {
-    amount: 90000, // OWNER-TBD (INR paise = ₹900 TEST VALUE)
+    amount: 35000, // ₹350 Pixel Pro one-time (owner-set 2026-09-28)
     currency: "INR", // OWNER-TBD — UPI needs INR; finalize pricing before live
     name: "Pixel Pro",
     description: "Custom Screenshot Pixel Pro — one-time",
