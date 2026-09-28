@@ -362,7 +362,7 @@ function startRegion(overlay: HTMLElement) {
       // let the browser repaint without our overlay before capturing
       await new Promise((r) => setTimeout(r, 120));
       const cfg = await readActiveConfig();
-      const raw = (await requestBoosted(cfg.quality)) ?? (await requestRaw());
+      const raw = (await requestBoosted(cfg.quality, { x, y, width: w, height: h })) ?? (await requestRaw());
       const cropped = await cropDataUrl(raw, { x, y, width: w, height: h }, cfg.quality, cfg.format);
       await chrome.runtime.sendMessage({
         type: "CS_FINISH_PICK",
@@ -474,7 +474,13 @@ function startElement(overlay: HTMLElement) {
     try {
       await new Promise((res) => setTimeout(res, 120));
       const cfg = await readActiveConfig();
-      const raw = (await requestBoosted(cfg.quality)) ?? (await requestRaw());
+      const raw =
+        (await requestBoosted(cfg.quality, {
+          x: Math.max(0, r.x),
+          y: Math.max(0, r.y),
+          width: w,
+          height: h,
+        })) ?? (await requestRaw());
       const cropped = await cropDataUrl(
         raw,
         { x: Math.max(0, r.x), y: Math.max(0, r.y), width: w, height: h },
@@ -531,11 +537,17 @@ function requestRaw(): Promise<string> {
   });
 }
 
-/** Density-boosted viewport shot for crops; null when pointless or blocked. */
-function requestBoosted(quality: Quality): Promise<string | null> {
+/** Density-boosted viewport shot for crops; null when pointless or blocked.
+ * With rect (CSS px, known at capture time) the background fits THAT RECT
+ * into an 8K frame; without it, viewport-based boost. Crop math is unchanged:
+ * cropDataUrl derives scale from the actual bitmap, so rect×dsf falls out. */
+function requestBoosted(
+  quality: Quality,
+  rect?: { x: number; y: number; width: number; height: number }
+): Promise<string | null> {
   return new Promise((resolve) => {
     try {
-      chrome.runtime.sendMessage({ type: "CS_CAPTURE_BOOSTED_VISIBLE", quality }, (res) => {
+      chrome.runtime.sendMessage({ type: "CS_CAPTURE_BOOSTED_VISIBLE", quality, rect }, (res) => {
         if (chrome.runtime.lastError || !res?.ok) resolve(null);
         else resolve(res.raw as string);
       });
