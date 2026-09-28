@@ -97,7 +97,46 @@ body {
 .dark *::-webkit-scrollbar-thumb:hover {
   background-color: #64748b;
 }
-/* Pro (gated on the `pro` class App toggles on <html>, mirroring `.dark`): gold thumb. */
+/* Viewport scroller: `*::-webkit-scrollbar` never matches the viewport
+   scrollbar in Chromium — it must be targeted on `html` itself. The panel
+   scrolls the document (App root in App.tsx has no overflow-y container;
+   only `overflow-x-clip`), so without html-level rules the side panel keeps
+   the native scrollbar while only inner overflow lists get styled. `dark`
+   and `pro` classes live on <html> itself (see theme.ts / App.tsx), so the
+   `.dark *` / `.pro *` descendant selectors above never match the viewport
+   scroller either — hence the explicit html.dark / html.pro variants below.
+   Panel-scoped: this stylesheet is imported solely by
+   src/sidepanel/main.tsx, never by content scripts. */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 transparent;
+}
+html::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+html::-webkit-scrollbar-track {
+  background: transparent;
+}
+html::-webkit-scrollbar-thumb {
+  background-color: #94a3b8;
+  border-radius: 999px;
+}
+html::-webkit-scrollbar-thumb:hover {
+  background-color: #64748b;
+}
+html.dark {
+  scrollbar-color: #475569 transparent;
+}
+html.dark::-webkit-scrollbar-thumb {
+  background-color: #475569;
+}
+html.dark::-webkit-scrollbar-thumb:hover {
+  background-color: #64748b;
+}
+/* Pro (gated on the `pro` class App toggles on <html>): gold thumb.
+   Both the viewport scroller (html.pro) and inner overflow containers
+   (`.pro *`, e.g. diagnostics log) get the gold thumb. */
 .pro * {
   scrollbar-color: #d4af37 transparent;
 }
@@ -108,5 +147,17 @@ body {
   background-color: #b8912a;
 }
 .pro.dark *::-webkit-scrollbar-thumb:hover {
+  background-color: #e5c76b;
+}
+html.pro {
+  scrollbar-color: #d4af37 transparent;
+}
+html.pro::-webkit-scrollbar-thumb {
+  background-color: #d4af37;
+}
+html.pro::-webkit-scrollbar-thumb:hover {
+  background-color: #b8912a;
+}
+html.pro.dark::-webkit-scrollbar-thumb:hover {
   background-color: #e5c76b;
 }

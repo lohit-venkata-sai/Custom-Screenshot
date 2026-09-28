@@ -1,4 +1,4 @@
-import { X, User, LogOut } from "lucide-react";
+import { X, User, LogOut, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { TRIAL_DAILY_4K } from "../../lib/storage";
 import { DISCORD_URL, DiscordIcon } from "./parts";
@@ -12,6 +12,7 @@ export function ProfileDialog({
   onClipboardChange,
   onSignIn,
   onSignOut,
+  onUpgrade,
   onClose,
 }: {
   email: string | null;
@@ -22,6 +23,7 @@ export function ProfileDialog({
   onClipboardChange: (on: boolean) => void;
   onSignIn: () => void;
   onSignOut: () => void;
+  onUpgrade: () => void;
   onClose: () => void;
 }) {
   return (
@@ -82,7 +84,24 @@ export function ProfileDialog({
             >
               Continue with Google
             </button>
+            <button
+              onClick={onUpgrade}
+              aria-label="Go Pro — sign in first, then see Pro plans"
+              className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-[#D4AF37]/50 bg-[#D4AF37]/10 py-2 text-[13.5px] font-bold text-[#8A6D1B] hover:bg-[#D4AF37]/20 dark:text-[#E5C76B]"
+            >
+              <Sparkles size={15} /> Go Pro
+            </button>
           </div>
+        )}
+
+        {email && !pro && (
+          <button
+            onClick={onUpgrade}
+            aria-label="Go Pro — unlimited 4K and 8K"
+            className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-[#A8842C] to-[#D4AF37] py-2.5 text-[14px] font-bold text-[#1A1405] shadow-sm hover:brightness-105 dark:from-[#B8912A] dark:to-[#E5C76B]"
+          >
+            <Sparkles size={16} /> Go Pro — unlimited 4K &amp; 8K
+          </button>
         )}
 
         <h4 className="mt-4 text-[13px] font-bold uppercase tracking-wide text-muted-foreground">Settings</h4>
