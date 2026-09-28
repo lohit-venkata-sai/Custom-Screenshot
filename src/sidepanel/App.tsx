@@ -69,6 +69,17 @@ export default function App() {
     };
     loadTrials(null);
     isPro().then(setPro).catch(() => undefined);
+    // Pro can flip while the panel is open (unlock/refresh elsewhere):
+    // follow the same `proPaid` cache — no reload needed.
+    const onProChanged = (
+      changes: { [key: string]: chrome.storage.StorageChange },
+      areaName: string
+    ) => {
+      if (areaName === "local" && "proPaid" in changes) {
+        isPro().then(setPro).catch(() => undefined);
+      }
+    };
+    chrome.storage.onChanged.addListener(onProChanged);
     getTrialIdentity()
       .then((email) => {
         setIdentity(email);
@@ -85,7 +96,14 @@ export default function App() {
         }
       })
       .catch(() => undefined);
+    return () => chrome.storage.onChanged.removeListener(onProChanged);
   }, []);
+
+  // Pro-gated panel chrome (e.g. gold scrollbars in globals.css) mirrors the
+  // `.dark` theme approach: a `pro` class on <html>, styled in the panel stylesheet.
+  useEffect(() => {
+    document.documentElement.classList.toggle("pro", pro);
+  }, [pro]);
 
   const persistConfig = useCallback(
     (c: CaptureType, q: Quality, f: Format) => {
@@ -167,7 +185,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-clip">
       <Toaster position="top-center" theme={theme} closeButton toastOptions={{ duration: 3500 }} />
-      <header className="sticky top-0 z-10 border-b border-border bg-card/95 backdrop-blur">
+      <header className={cn("sticky top-0 z-10 border-b border-border bg-card/95 backdrop-blur", pro && "border-b-[#D4AF37]/40 [box-shadow:0_1px_16px_-6px_rgba(212,175,55,0.55)]")}>
         <div className="flex items-center gap-2.5 px-4 py-3">
           <BrandIcon />
           <div className="flex-1 leading-tight">
@@ -188,7 +206,10 @@ export default function App() {
             onClick={() => setProfileOpen(true)}
             aria-label={identity ? `Profile (${identity})` : "Open profile"}
             title={identity ?? "Profile"}
-            className="flex h-9 w-9 items-center justify-center rounded-xl border border-border text-[14px] font-bold text-white bg-gradient-to-r from-[#2563EB] to-[#3B82F6] hover:brightness-110"
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-xl border border-border text-[14px] font-bold text-white bg-gradient-to-r from-[#2563EB] to-[#3B82F6] hover:brightness-110",
+              pro && "border-2 border-[#D4AF37] shadow-[0_0_12px_-2px_rgba(212,175,55,0.6)]"
+            )}
           >
             {identity ? identity.charAt(0).toUpperCase() : <User size={17} />}
           </button>
@@ -209,7 +230,9 @@ export default function App() {
               className={cn(
                 "flex-1 rounded-t-xl px-3 py-2.5 text-[14px] font-semibold border-b-2 transition-colors",
                 tab === t
-                  ? "text-[#2563EB] dark:text-[#60A5FA] border-[#2563EB] dark:border-[#60A5FA] bg-[#EFF6FF]/60 dark:bg-[#172554]/60"
+                  ? pro
+                    ? "text-[#8A6D1B] dark:text-[#E5C76B] border-[#D4AF37] bg-[#D4AF37]/10 dark:bg-[#D4AF37]/10 shadow-[0_0_12px_-2px_rgba(212,175,55,0.6)]"
+                    : "text-[#2563EB] dark:text-[#60A5FA] border-[#2563EB] dark:border-[#60A5FA] bg-[#EFF6FF]/60 dark:bg-[#172554]/60"
                   : "text-muted-foreground border-transparent hover:text-foreground"
               )}
             >
@@ -219,11 +242,14 @@ export default function App() {
         </nav>
         <button
           onClick={() => (identity ? setProfileOpen(true) : setProOpen("login"))}
-          className="flex w-full items-center justify-center gap-1.5 border-t border-border bg-muted/40 px-4 py-1.5 text-[12px] text-muted-foreground hover:text-foreground"
+          className={cn(
+            "flex w-full items-center justify-center gap-1.5 border-t border-border bg-muted/40 px-4 py-1.5 text-[12px] text-muted-foreground hover:text-foreground",
+            pro && "border-t-[#D4AF37]/40 bg-[#D4AF37]/10 text-[#8A6D1B] dark:text-[#E5C76B] hover:text-[#8A6D1B] dark:hover:text-[#E5C76B]"
+          )}
           aria-label="Trial status — open profile"
         >
           {pro ? (
-            <span>✓ Pro active — unlimited 4K and 8K</span>
+            <span className="font-semibold">✓ Pro active — unlimited 4K and 8K</span>
           ) : TESTING_UNLIMITED_TRIALS ? (
             <span>
               <span className="mr-1.5 rounded border border-amber-500/60 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-extrabold tracking-wide text-amber-600 dark:text-amber-400">
@@ -244,6 +270,7 @@ export default function App() {
           <>
             <CaptureTab
               captureType={captureType}
+              pro={pro}
               onChange={(t) => {
                 setCaptureType(t);
                 // PDF exists only for full page.
@@ -269,6 +296,7 @@ export default function App() {
                     active={quality === q}
                     quality={q}
                     sub={QUALITY_DIMS[q]}
+                    pro={pro}
                     locked={lockedQualities.includes(q)}
                     trialLeft={
                       q === "4K"
@@ -319,7 +347,7 @@ export default function App() {
                 </p>
               )}
               {pro && (
-                <p className="mt-1.5 text-[12px] text-muted-foreground">
+                <p className="mt-1.5 text-[12px] font-semibold text-[#8A6D1B] dark:text-[#E5C76B]">
                   ✓ Pro active — unlimited 4K and 8K.
                 </p>
               )}
@@ -329,12 +357,13 @@ export default function App() {
               <h2 className="text-[17px] font-bold mb-2">Format</h2>
               <div className="flex gap-2 items-stretch">
                 {(["png", "jpg", "webp"] as Format[]).map((f) => (
-                  <FormatButton key={f} active={format === f} format={f} onClick={() => { setFormat(f); persistConfig(captureType, quality, f); }} />
+                  <FormatButton key={f} active={format === f} format={f} pro={pro} onClick={() => { setFormat(f); persistConfig(captureType, quality, f); }} />
                 ))}
                 {captureType === "fullPage" && (
                   <FormatButton
                     active={format === "pdf"}
                     format={"pdf" as Format}
+                    pro={pro}
                     onClick={() => { setFormat("pdf"); persistConfig(captureType, quality, "pdf"); }}
                   />
                 )}
@@ -358,7 +387,7 @@ export default function App() {
                   aria-label="Preset name"
                   className="flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground"
                 />
-                <Button onClick={handleSavePreset} disabled={!presetName.trim() || busy}>
+                <Button onClick={handleSavePreset} disabled={!presetName.trim() || busy} className={cn(pro && "bg-gradient-to-r from-[#A8842C] to-[#D4AF37] dark:from-[#B8912A] dark:to-[#E5C76B] text-[#1A1405] border border-[#8A6D1B]/40 shadow-sm hover:brightness-105")}>
                   Save
                 </Button>
               </div>
@@ -369,9 +398,9 @@ export default function App() {
               )}
             </section>
 
-            <Button onClick={handleCapture} disabled={busy} className="w-full h-12 text-[15px] font-bold rounded-xl bg-gradient-to-r from-[#2563EB] to-[#3B82F6] dark:from-[#2563EB] dark:to-[#60A5FA] border border-white/20 shadow-lg">
+            <Button onClick={handleCapture} disabled={busy} className={cn("w-full h-12 text-[15px] font-bold rounded-xl border shadow-lg", pro ? "bg-gradient-to-r from-[#A8842C] via-[#D4AF37] to-[#B8912A] dark:from-[#B8912A] dark:via-[#E5C76B] dark:to-[#B8912A] text-[#1A1405] border-[#8A6D1B]/40" : "bg-gradient-to-r from-[#2563EB] to-[#3B82F6] dark:from-[#2563EB] dark:to-[#60A5FA] text-white border-white/20")}>
               <Camera size={19} /> Capture Screenshot
-              <kbd className="ml-2 rounded-md border border-white/30 px-2 py-0.5 text-[11px] font-medium" title="Remap to Ctrl + Alt + S in chrome://extensions/shortcuts">Alt + Shift + S</kbd>
+              <kbd className={cn("ml-2 rounded-md border px-2 py-0.5 text-[11px] font-medium", pro ? "border-[#1A1405]/30" : "border-white/30")} title="Remap to Ctrl + Alt + S in chrome://extensions/shortcuts">Alt + Shift + S</kbd>
             </Button>
           </>
         ) : (
