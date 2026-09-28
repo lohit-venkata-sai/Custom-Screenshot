@@ -1,0 +1,16 @@
+name = "custom-screenshot-license"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+# KV namespace holding paid licenses (key: "license:<lowercased-email>").
+# Create with: wrangler kv:namespace create LICENSES
+# then paste the returned id below.
+[[kv_namespaces]]
+binding = "LICENSES"
+id = "REPLACE-WITH-KV-NAMESPACE-ID"
+
+[vars]
+# Comma-separated list of extension origins allowed to call /api/order and
+# /api/license. The chrome-extension:// ID varies per build — add the dev ID
+# from chrome://extensions and later the Web Store ID.
+ALLOWED_ORIGINS = "chrome-extension://REPLACE-WITH-EXTENSION-ID"

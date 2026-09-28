@@ -7,6 +7,9 @@ import {
   isPro,
   getTrialIdentity,
   signInWithGoogle,
+  fetchLicense,
+  startProPurchase,
+  PAYMENTS_LIVE,
 } from "../../lib/pro";
 
 type Status = "checking" | "unpaid" | "paid";
@@ -36,6 +39,7 @@ export function ProModal({
 }) {
   const [status, setStatus] = useState<Status>("checking");
   const [email, setEmail] = useState<string | null>(null);
+  const [buying, setBuying] = useState(false);
 
   const check = async () => {
     setStatus("checking");
@@ -98,22 +102,66 @@ export function ProModal({
     }
   };
 
-  const pay = () => {
-    // Payments stack removed (Razorpay planned later): checkout stays dormant.
-    toast.message("Checkout is coming soon");
+  const pay = async () => {
+    // Kill-switch: payments not live → coming-soon toast, no network.
+    if (!PAYMENTS_LIVE) {
+      toast.message("Checkout is coming soon");
+      return;
+    }
+    if (buying) return;
+    setBuying(true);
+    try {
+      const res = await startProPurchase("pro");
+      if (res.ok) {
+        setStatus("paid");
+        toast.success("Pro unlocked — enjoy unlimited 4K and 8K");
+        onUnlocked();
+        onClose();
+      } else if (res.reason === "NEED_SIGNIN") {
+        toast.message("Continue with Google first — checkout needs your email");
+      } else if (res.reason === "NOT_CONFIGURED") {
+        toast.message("Checkout is coming soon");
+      } else if (res.reason === "TAB_CLOSED") {
+        toast.message("Payment tab closed — use “I've paid — refresh” if you completed payment");
+      } else if (res.reason === "TIMEOUT") {
+        toast.message("Still processing — press “I've paid — refresh” in a moment");
+      } else {
+        toast.error("Couldn't start checkout — check your connection and retry");
+      }
+    } finally {
+      setBuying(false);
+    }
   };
 
   const refresh = async () => {
     try {
-      const paid = await isPro();
-      if (paid) {
+      // Fast path: sticky local cache.
+      const cached = await isPro();
+      if (cached) {
         toast.success("Pro unlocked — enjoy unlimited 4K and 8K");
         onUnlocked();
         onClose();
-      } else {
-        await check();
-        toast.message("No Pro license found yet");
+        return;
       }
+      // Real re-check against the Worker license (no-op until configured).
+      const identity = email ?? (await getTrialIdentity());
+      if (identity) {
+        const lic = await fetchLicense(identity);
+        if (lic.pro) {
+          try {
+            await chrome.storage.local.set({ proPaid: true });
+          } catch {
+            /* noop */
+          }
+          setStatus("paid");
+          toast.success("Pro unlocked — enjoy unlimited 4K and 8K");
+          onUnlocked();
+          onClose();
+          return;
+        }
+      }
+      await check();
+      toast.message("No Pro license found yet");
     } catch {
       toast.error("License check failed — check your connection");
     }
@@ -186,9 +234,15 @@ export function ProModal({
             <Button
               className="mt-4 w-full h-11 font-bold"
               onClick={pay}
-              disabled={status === "checking"}
+              disabled={status === "checking" || buying}
             >
-              {status === "checking" ? "Checking…" : "Get Pro — Coming soon"}
+              {status === "checking"
+                ? "Checking…"
+                : buying
+                  ? "Opening checkout…"
+                  : PAYMENTS_LIVE
+                    ? "Get Pixel Pro — $9 one-time"
+                    : "Get Pro — Coming soon"}
             </Button>
             <div className="mt-2 flex items-center justify-center">
               <button

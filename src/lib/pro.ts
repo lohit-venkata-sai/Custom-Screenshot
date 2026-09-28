@@ -1,29 +1,56 @@
 /**
- * Pro licensing — payments stack removed (Stripe blocked in India,
- * ExtensionPay paused). Razorpay lands in a later milestone.
+ * Pro licensing — Razorpay test-mode via Cloudflare Worker + Payment Links
+ * (MV3 forbids remote JS, so no checkout.js: the Worker creates a
+ * Razorpay-hosted Payment Link, opened in a normal tab).
  *
- * Until then: Google OAuth web-flow sign-in binds the 4K/8K daily trial
- * to an identity (`trialEmail`); `isPro()` reads the LOCAL `proPaid`
- * cache only (always false until Razorpay lands — that is correct).
+ * Google OAuth web-flow sign-in binds the 4K/8K daily trial to an identity
+ * (`trialEmail`); `isPro()` reads the LOCAL `proPaid` cache first, then the
+ * Worker license (network failure fails closed to cache, never throws).
  */
 
-// Flip to true once Razorpay plans are live and tested. Until then the
-// paywall shows "coming soon" instead of opening checkout.
+// Kill-switch: false = coming-soon toast, NO network (Worker calls skipped
+// in isPro/startProPurchase). Flip to true only once Razorpay plans are
+// live and tested end-to-end.
 export const PAYMENTS_LIVE = false;
+
+// TODO(owner): paste the deployed Worker URL here (see worker/README.md),
+// e.g. "https://custom-screenshot-license.<account>.workers.dev".
+export const WORKER_URL = "https://REPLACE-WITH-WORKER.workers.dev";
+
+/** Backend-supported plans from day one (Pro+ UI lands later). */
+export type ProPlan = "pro" | "proplus";
 
 export interface ProUser {
   paid: boolean;
   email: string | null;
 }
 
-/** Fast gate for captures: sticky local paid cache. Never throws. */
+/** Fast gate for captures: sticky local paid cache, then Worker license.
+ * Never throws; network failure fails closed to the local cache. While the
+ * PAYMENTS_LIVE kill-switch is off (or WORKER_URL unconfigured) this is
+ * cache-only — no network leaves the capture flow. */
 export async function isPro(): Promise<boolean> {
+  let cached = false;
   try {
-    const cached = await chrome.storage.local.get(["proPaid"]);
-    return cached.proPaid === true;
+    const res = await chrome.storage.local.get(["proPaid"]);
+    cached = res.proPaid === true;
   } catch {
     return false;
   }
+  if (cached) return true;
+  if (!PAYMENTS_LIVE || !isWorkerConfigured()) return cached;
+  try {
+    const identity = await getTrialIdentity();
+    if (!identity) return cached;
+    const lic = await fetchLicense(identity);
+    if (lic.pro) {
+      await setProPaid();
+      return true;
+    }
+  } catch {
+    /* fail closed to cache */
+  }
+  return cached;
 }
 
 /** Tester/dev reset: clears the LOCAL paid flag. */
@@ -105,4 +132,125 @@ export async function getTrialIdentity(): Promise<string | null> {
     /* noop */
   }
   return null;
+}
+
+// ---------- Razorpay licensing via Worker (Payment Links, no remote JS) ----------
+
+export interface LicenseStatus {
+  pro: boolean;
+  plan: string | null;
+}
+
+function isWorkerConfigured(): boolean {
+  return !WORKER_URL.includes("REPLACE-WITH-WORKER");
+}
+
+async function setProPaid(): Promise<void> {
+  try {
+    await chrome.storage.local.set({ proPaid: true });
+  } catch {
+    /* noop */
+  }
+}
+
+function fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(t));
+}
+
+/** Real license re-check against the Worker. Never throws (false on any failure). */
+export async function fetchLicense(email: string): Promise<LicenseStatus> {
+  const none: LicenseStatus = { pro: false, plan: null };
+  if (!email || !isWorkerConfigured()) return none;
+  try {
+    const res = await fetchWithTimeout(
+      `${WORKER_URL}/api/license?email=${encodeURIComponent(email)}`,
+      {},
+      8000
+    );
+    if (!res.ok) return none;
+    const data = (await res.json()) as Partial<LicenseStatus>;
+    return { pro: data.pro === true, plan: typeof data.plan === "string" ? data.plan : null };
+  } catch {
+    return none;
+  }
+}
+
+export type PurchaseResult =
+  | { ok: true }
+  | { ok: false; reason: "NOT_LIVE" | "NOT_CONFIGURED" | "NEED_SIGNIN" | "ORDER_FAILED" | "OPEN_FAILED" | "TAB_CLOSED" | "TIMEOUT"; link_url?: string };
+
+const POLL_EVERY_MS = 5000;
+const POLL_MAX = 60; // 60 × 5s = 5min bounded polling
+
+/**
+ * Full purchase: POST /api/order → open hosted Payment Link tab → poll
+ * license until unlock, timeout, or tab close. Never throws; toasts live in
+ * the caller (ProModal) — this lib stays UI-free so the background service
+ * worker can import it. Resolves true only after proPaid is set.
+ */
+export async function startProPurchase(plan: ProPlan): Promise<PurchaseResult> {
+  if (!PAYMENTS_LIVE) return { ok: false, reason: "NOT_LIVE" };
+  if (!isWorkerConfigured()) return { ok: false, reason: "NOT_CONFIGURED" };
+  const email = await getTrialIdentity().catch(() => null);
+  if (!email) return { ok: false, reason: "NEED_SIGNIN" };
+
+  let linkUrl = "";
+  try {
+    const res = await fetchWithTimeout(
+      `${WORKER_URL}/api/order`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, plan }),
+      },
+      15000
+    );
+    if (!res.ok) return { ok: false, reason: "ORDER_FAILED" };
+    const data = (await res.json()) as { link_url?: string };
+    if (!data.link_url) return { ok: false, reason: "ORDER_FAILED" };
+    linkUrl = data.link_url;
+  } catch {
+    return { ok: false, reason: "ORDER_FAILED" };
+  }
+
+  let tabId: number | undefined;
+  let tabClosed = false;
+  const onRemoved = (id: number) => {
+    if (id === tabId) tabClosed = true;
+  };
+  try {
+    const tab = await chrome.tabs.create({ url: linkUrl });
+    tabId = tab.id;
+    chrome.tabs.onRemoved.addListener(onRemoved);
+  } catch {
+    return { ok: false, reason: "OPEN_FAILED", link_url: linkUrl };
+  }
+
+  try {
+    for (let i = 0; i < POLL_MAX; i++) {
+      await new Promise((r) => setTimeout(r, POLL_EVERY_MS));
+      if (tabClosed) return { ok: false, reason: "TAB_CLOSED" };
+      if (tabId !== undefined) {
+        try {
+          await chrome.tabs.get(tabId);
+        } catch {
+          return { ok: false, reason: "TAB_CLOSED" };
+        }
+      }
+      const lic = await fetchLicense(email);
+      if (lic.pro) {
+        await setProPaid();
+        return { ok: true };
+      }
+    }
+    return { ok: false, reason: "TIMEOUT" };
+  } finally {
+    try {
+      chrome.tabs.onRemoved.removeListener(onRemoved);
+    } catch {
+      /* noop */
+    }
+  }
 }
