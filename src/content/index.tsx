@@ -256,8 +256,81 @@ function ensurePickCursor() {
 }
 
 function removePickCursor() {
+  if (pickFollowerMove) {
+    document.removeEventListener("mousemove", pickFollowerMove, true);
+    pickFollowerMove = null;
+  }
+  pickFollower?.remove();
+  pickFollower = null;
   document.getElementById(PICK_CURSOR_ID)?.remove();
   document.documentElement.classList.remove("cs-picking");
+  document.documentElement.style.cursor = "";
+}
+
+// CSP fallback: pages with strict style-src (GitHub, docs sites) block the
+// <style> stylesheet above, so the probe below detects that and we fall back
+// to a follower crosshair. Everything here uses CSSOM property assignments
+// (el.style.*) and an inline SVG with presentation attributes only — no
+// <style> elements, no stylesheets, no style="" markup — so strict CSP can't
+// block it. Follower ONLY exists in fallback mode (no double cursor).
+let pickFollower: HTMLElement | null = null;
+let pickFollowerMove: ((e: MouseEvent) => void) | null = null;
+
+// Returns true when the session stylesheet actually took effect. Must run
+// after ensurePickCursor (html.cs-picking present): the probe <span> matches
+// `html.cs-picking *`, so computed cursor is "crosshair" iff the stylesheet
+// survived CSP. Anything else means CSP blocked it.
+function pickStylesheetWorks(): boolean {
+  try {
+    if (!document.body) return true; // can't probe; assume primary path
+    const probe = document.createElement("span");
+    probe.style.position = "absolute";
+    probe.style.top = "-9999px";
+    probe.style.left = "-9999px";
+    probe.style.visibility = "hidden";
+    probe.style.pointerEvents = "none";
+    document.body.appendChild(probe);
+    const cur = getComputedStyle(probe).cursor;
+    probe.remove();
+    return cur === "crosshair";
+  } catch {
+    return true;
+  }
+}
+
+function enablePickFollower() {
+  document.documentElement.style.cursor = "none";
+  if (document.body) document.body.style.cursor = "none";
+  // Prefer the existing shadow root (isolated from page CSS); never create
+  // one just for this — else fall back to the page with inline styles only.
+  const hostEl = document.getElementById(HOST_ID);
+  const parent: HTMLElement | ShadowRoot =
+    shadow && hostEl?.isConnected ? shadow : document.documentElement;
+  const f = document.createElement("div");
+  f.id = "cs-pick-follower";
+  f.setAttribute("aria-hidden", "true");
+  f.style.position = "fixed";
+  f.style.left = `${Math.round(window.innerWidth / 2)}px`;
+  f.style.top = `${Math.round(window.innerHeight / 2)}px`;
+  f.style.width = "24px";
+  f.style.height = "24px";
+  f.style.margin = "-12px 0 0 -12px";
+  f.style.zIndex = "2147483647";
+  f.style.pointerEvents = "none";
+  // Inline SVG crosshair (~24px, dark outline + white core for contrast on
+  // any background). Presentation attributes only — no style dependency.
+  f.innerHTML =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><g fill="none" stroke="#0F172A" stroke-width="3" opacity="0.9"><path d="M12 1v7M12 16v7M1 12h7M16 12h7"/><circle cx="12" cy="12" r="5"/></g><g fill="none" stroke="#ffffff" stroke-width="1.5"><path d="M12 1v7M12 16v7M1 12h7M16 12h7"/><circle cx="12" cy="12" r="5"/></g></svg>';
+  const svg = f.querySelector("svg") as unknown as HTMLElement | null;
+  if (svg) svg.style.display = "block";
+  parent.appendChild(f);
+  const move = (e: MouseEvent) => {
+    f.style.left = `${e.clientX}px`;
+    f.style.top = `${e.clientY}px`;
+  };
+  document.addEventListener("mousemove", move, true);
+  pickFollower = f;
+  pickFollowerMove = move;
 }
 
 function cleanupOverlay() {
@@ -305,6 +378,7 @@ function startPick(mode: "region" | "element") {
   document.documentElement.appendChild(overlay);
   document.body.style.cursor = "crosshair";
   ensurePickCursor();
+  if (!pickStylesheetWorks()) enablePickFollower();
   setFocusSuppressed(true);
   document.addEventListener("keydown", escHandler, true);
 
