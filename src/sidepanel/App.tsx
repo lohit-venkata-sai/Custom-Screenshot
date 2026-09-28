@@ -472,6 +472,12 @@ export default function App() {
             setProfileOpen(false);
             setProOpen("login");
           }}
+          onUpgrade={() => {
+            // Non-Pro shortcut to the upsell. Signed-out users have no trial
+            // identity yet, so route them through sign-in first (login mode).
+            setProfileOpen(false);
+            setProOpen(identity ? "upsell" : "login");
+          }}
           onSignOut={() => {
             setIdentity(null);
             setPro(false);
