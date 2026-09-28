@@ -115,13 +115,16 @@ export function QualityButton({
       {showTrialBadge && (
         <span
           className="pointer-events-none absolute left-0 top-0 h-[30px] w-[30px] overflow-hidden"
-          aria-label={
-            exhausted ? "Trial exhausted — go Pro" : `${trialLeft} free trial shots left today`
-          }
+          aria-hidden="true"
         >
           <span className="absolute left-[-12px] top-[5px] flex w-[42px] -rotate-45 items-center justify-center bg-[#D4AF37] text-[10px] font-bold leading-[14px] text-white">
             {exhausted ? <Crown size={10} strokeWidth={3} aria-hidden /> : trialLeft}
           </span>
+        </span>
+      )}
+      {showTrialBadge && (
+        <span className="sr-only">
+          {exhausted ? "Trial exhausted — go Pro" : `${trialLeft} free trial shots left today`}
         </span>
       )}
       <div className="text-sm font-semibold">{quality}</div>
