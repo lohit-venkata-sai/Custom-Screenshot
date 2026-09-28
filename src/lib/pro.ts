@@ -11,7 +11,7 @@
 // Kill-switch: false = coming-soon toast, NO network (Worker calls skipped
 // in isPro/startProPurchase). Flip to true only once Razorpay plans are
 // live and tested end-to-end.
-export const PAYMENTS_LIVE = false;
+export const PAYMENTS_LIVE = true;
 
 // TODO(owner): paste the deployed Worker URL here (see worker/README.md),
 // e.g. "https://custom-screenshot-license.<account>.workers.dev".
