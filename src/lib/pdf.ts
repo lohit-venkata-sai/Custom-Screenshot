@@ -82,8 +82,3 @@ export function jpegPagesToPdfDataUrl(pages: PdfPageImage[]): string {
   }
   return `data:application/pdf;base64,${u8ToBase64(total)}`;
 }
-
-/** Back-compat single-image entry. */
-export function jpegDataUrlToPdfDataUrl(jpegDataUrl: string, wPx: number, hPx: number): string {
-  return jpegPagesToPdfDataUrl([{ jpegDataUrl, w: wPx, h: hPx }]);
-}

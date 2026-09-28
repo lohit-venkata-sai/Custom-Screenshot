@@ -169,11 +169,3 @@ export async function consumeTrial(q: TrialQuality, email = ""): Promise<boolean
   });
   return true;
 }
-
-export async function trialRemaining4k(): Promise<number> {
-  return trialRemaining("4K", "");
-}
-
-export async function consumeTrial4k(): Promise<boolean> {
-  return consumeTrial("4K", "");
-}

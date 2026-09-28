@@ -637,8 +637,6 @@ async function emuCaptureViewport(
   }
 }
 
-// ---------- debugger protocol helpers (unused: full page is debugger-free) ----------
-
 async function doCapture(cfg?: CaptureConfig) {
   const tab = await activeTab();
   if (!tab || tab.id == null) throw new Error("No active tab");
@@ -818,20 +816,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const tab = sender.tab ?? (await activeTab());
       await openPanelForTab(tab?.id);
       sendResponse({ ok: true });
-    } else if (msg.type === "CS_CLIPBOARD_TEST") {
-      // Self-test: 1px PNG through the real pipeline. Isolates clipboard
-      // from capture so failures point at the environment, not the flow.
-      const tab = await activeTab().catch(() => null);
-      const c = new OffscreenCanvas(1, 1);
-      const cx = c.getContext("2d");
-      if (!cx) throw new Error("canvas unavailable");
-      cx.fillStyle = "#2563EB";
-      cx.fillRect(0, 0, 1, 1);
-      const blob = await c.convertToBlob({ type: "image/png" });
-      const dataUrl = await blobToDataUrl(blob);
-      const r = await copyToClipboard(dataUrl, tab?.id ?? null);
-      const good = r === "ok" || r === "ok-html";
-      sendResponse({ ok: good, detail: good ? (r === "ok-html" ? "ok (HTML flavor)" : r) : r });
     }
   })()
     .catch((e) => {

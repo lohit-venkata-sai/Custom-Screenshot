@@ -952,4 +952,3 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 } // end !alreadyLoaded guard
 
 export {};
-void canvasToDataUrl;

@@ -14,8 +14,8 @@ SOURCE LAYOUT (src/)
 - lib/capture.ts — resize/encode/crop engine (never upscales).
 - lib/pdf.ts — dependency-free multi-page PDF writer.
 - lib/storage.ts — presets, settings, trial counters (per identity email).
-- lib/pro.ts — Pro licensing (ExtensionPay + Google sign-in helpers).
-- lib/extpay/ — vendored ExtPay.js (MV3 forbids remote code).
+- lib/pro.ts — Pro gating (Google sign-in identity + local pro cache;
+  Razorpay milestone pending, PAYMENTS_LIVE=false).
 - lib/theme.ts, lib/utils.ts, types/index.ts.
 
 FEATURES (V1)
@@ -36,10 +36,11 @@ FEATURES (V1)
 MONETIZATION STATE
 - 4K + 8K: 2 free shots/day each, bound to signed-in identity.
 - Sign-in: Google OAuth web-flow (works Chrome+Brave) + email-link fallback.
-  ExtensionPay ID: custom-screenshot. PAYMENTS_LIVE=false (flip when live).
+  No payment provider wired yet. PAYMENTS_LIVE=false (flip when Razorpay live).
 - Google Cloud: OAuth clients exist (Chrome-type + Web-type).
   Dev extension ID: bmnookhlomoadfgpooiijdljclapkkke (redirect URIs per ID!).
-- Stripe: BLOCKED in India (invite-only) — ExtensionPay paused.
+- Payments stack removed (Stripe unavailable in India) — Razorpay +
+  Cloudflare Worker planned, NOT STARTED.
 - Plan: Razorpay + Cloudflare Worker for licensing (UPI works). Status: NOT
   STARTED — needs Razorpay test Key ID + Secret from owner.
 - Prices decided: Pro $9 one-time ("Pixel Pro"); bulk screenshots later = Pro+ $19.
@@ -55,7 +56,6 @@ PENDING / NEXT VERSION
   debugger path (auto-fallback); huge pages capped for canvas safety.
 
 CREDENTIALS / IDS (owner holds secrets — never commit them)
-- ExtensionPay extension: custom-screenshot
 - Google OAuth clients in owner's Cloud project (IDs in git history: chore
   commits; Web client redirect per extension ID).
 - Discord: https://discord.gg/M4kAbUJbS (DISCORD_URL in parts.tsx).
