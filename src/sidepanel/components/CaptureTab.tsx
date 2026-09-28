@@ -12,9 +12,12 @@ const ITEMS: Array<{ id: CaptureType; title: string; desc: string; icon: typeof 
 
 export function CaptureTab({
   captureType,
+  pro = false,
   onChange,
 }: {
   captureType: CaptureType;
+  /** Pro gold theme — selected card ring, check circle and icon go gold. */
+  pro?: boolean;
   onChange: (t: CaptureType) => void;
 }) {
   const [focusIdx, setFocusIdx] = useState(0);
@@ -55,20 +58,26 @@ export function CaptureTab({
               className={cn(
                 "relative rounded-2xl border p-4 text-center transition-all bg-card",
                 selected
-                  ? "border-[#2563EB] dark:border-[#3B82F6] bg-[#EFF6FF] dark:bg-[#172554] shadow-sm"
+                  ? pro
+                    ? "border-[#D4AF37] bg-[#D4AF37]/10 dark:bg-[#D4AF37]/10 shadow-[0_0_16px_-4px_rgba(212,175,55,0.55)]"
+                    : "border-[#2563EB] dark:border-[#3B82F6] bg-[#EFF6FF] dark:bg-[#172554] shadow-sm"
                   : "border-border hover:border-[#2563EB]/50"
               )}
             >
               <span
                 className={cn(
                   "absolute top-3 right-3 h-5 w-5 rounded-full border-2 flex items-center justify-center",
-                  selected ? "border-[#2563EB] bg-[#2563EB] text-white" : "border-border text-transparent"
+                  selected
+                    ? pro
+                      ? "border-[#D4AF37] bg-[#D4AF37] text-[#1A1405]"
+                      : "border-[#2563EB] bg-[#2563EB] text-white"
+                    : "border-border text-transparent"
                 )}
                 aria-hidden
               >
                 <Check size={12} />
               </span>
-              <Icon size={34} className={cn("mx-auto mb-2", selected ? "text-[#2563EB] dark:text-[#60A5FA]" : "text-foreground")} />
+              <Icon size={34} className={cn("mx-auto mb-2", selected ? (pro ? "text-[#8A6D1B] dark:text-[#E5C76B]" : "text-[#2563EB] dark:text-[#60A5FA]") : "text-foreground")} />
               <div className="font-bold text-[15px]">{it.title}</div>
               <div className="text-[13px] text-muted-foreground mt-1 leading-snug">{it.desc}</div>
             </button>
