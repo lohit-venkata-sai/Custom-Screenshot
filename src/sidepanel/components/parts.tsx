@@ -3,14 +3,14 @@ import logoUrl from "../../assets/custom-screenshot-logo.png";
 import { cn } from "../../lib/utils";
 import type { CaptureType, Format, Preset, Quality } from "../../types";
 
-export function BrandIcon({ size = 34 }: { size?: number }) {
+export function BrandIcon({ size = 34, pro = false }: { size?: number; pro?: boolean }) {
   return (
     <img
       src={logoUrl}
       width={size}
       height={size}
       alt="Custom Screenshot"
-      className="rounded-xl shadow-sm"
+      className={cn("rounded-xl shadow-sm", pro && "border-2 border-[#D4AF37]")}
       style={{ width: size, height: size }}
     />
   );
