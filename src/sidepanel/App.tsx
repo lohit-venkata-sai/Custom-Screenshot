@@ -70,7 +70,7 @@ export default function App() {
     loadTrials(null);
     isPro().then(setPro).catch(() => undefined);
     // Pro can flip while the panel is open (unlock/refresh elsewhere):
-    // follow the same `proPaid` cache the toolbar icon watches — no reload needed.
+    // follow the same `proPaid` cache — no reload needed.
     const onProChanged = (
       changes: { [key: string]: chrome.storage.StorageChange },
       areaName: string
@@ -98,6 +98,12 @@ export default function App() {
       .catch(() => undefined);
     return () => chrome.storage.onChanged.removeListener(onProChanged);
   }, []);
+
+  // Pro-gated panel chrome (e.g. gold scrollbars in globals.css) mirrors the
+  // `.dark` theme approach: a `pro` class on <html>, styled in the panel stylesheet.
+  useEffect(() => {
+    document.documentElement.classList.toggle("pro", pro);
+  }, [pro]);
 
   const persistConfig = useCallback(
     (c: CaptureType, q: Quality, f: Format) => {
@@ -471,7 +477,6 @@ export default function App() {
             setTrialLeft8k(TRIAL_DAILY_8K);
             setProfileOpen(false);
             chrome.storage.local.remove(["trialEmail", "proPaid"]).catch(() => undefined);
-            chrome.runtime.sendMessage({ type: "CS_PRO_CHANGED" }).catch(() => undefined);
           }}
           onClose={() => setProfileOpen(false)}
         />
@@ -490,8 +495,6 @@ export default function App() {
           }}
           onUnlocked={() => {
             setPro(true);
-            // Wake the service worker so the toolbar icon re-syncs at once.
-            chrome.runtime.sendMessage({ type: "CS_PRO_CHANGED" }).catch(() => undefined);
             const em = identity ?? "";
             trialRemaining("4K", em).then(setTrialLeft).catch(() => undefined);
             trialRemaining("8K", em).then(setTrialLeft8k).catch(() => undefined);

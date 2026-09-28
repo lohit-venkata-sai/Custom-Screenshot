@@ -3,7 +3,6 @@ import { QUALITY_HEIGHT, QUALITY_WIDTH } from "../types";
 import { getActivePreset, getSettings } from "../lib/storage";
 import { trialRemaining, consumeTrial, TESTING_UNLIMITED_TRIALS } from "../lib/storage";
 import { isPro, getTrialIdentity } from "../lib/pro";
-import { refreshProActionIcon } from "../lib/proIcon";
 import { formatTimestamp, sanitizeFilename } from "../lib/utils";
 import { extFor } from "../lib/capture";
 import { pushDiag, getDiagLogs, diagTs, fmtBoost, diagRawReason, diagPickReason, fmtRect } from "../lib/diag";
@@ -1035,10 +1034,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     } else if (msg.type === "CS_GET_DIAG_LOGS") {
       // Test-mode diagnostics: newest-first lines from the in-memory ring.
       sendResponse({ ok: true, logs: getDiagLogs() });
-    } else if (msg.type === "CS_PRO_CHANGED") {
-      // Side panel unlocked/refreshed Pro (or signed out): re-sync the toolbar icon.
-      await refreshProActionIcon();
-      sendResponse({ ok: true });
     } else if (msg.type === "CS_OPEN_PANEL") {
       const tab = sender.tab ?? (await activeTab());
       await openPanelForTab(tab?.id);
@@ -1080,14 +1075,6 @@ chrome.commands.onCommand.addListener(async (command) => {
       }
     }
   }
-});
-
-// Pro toolbar icon: gold border while `proPaid` is set, stock icon otherwise.
-// Applied on service-worker startup; kept in sync via storage events (no polling)
-// plus an explicit panel ping (wakes a sleeping worker on unlock/sign-out).
-void refreshProActionIcon();
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === "local" && "proPaid" in changes) void refreshProActionIcon();
 });
 
 // Clicking the toolbar icon summons the centered capture pill on the page.
